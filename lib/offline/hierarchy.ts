@@ -1,0 +1,123 @@
+import { db, type Club, type CoachProfile, type Team } from "./db";
+import { ownedBy } from "./ownership";
+
+/**
+ * The pyramid: coach -> club -> age group (team) -> squad and activity rows.
+ *
+ * Age groups created before clubs existed have no `club_id`. Rather than
+ * forcing the coach to re-enter them, they are folded into a default club on
+ * first load so the hierarchy is always walkable end to end.
+ */
+
+const DEFAULT_CLUB_NAME = "ناديي";
+
+export interface ClubWithGroups {
+  club: Club;
+  groups: Team[];
+}
+
+/** Creates the coach's profile row if it does not exist yet. */
+export async function ensureCoachProfile(
+  ownerId: string,
+  fullName?: string,
+): Promise<CoachProfile> {
+  const existing = await db.coach_profiles.get(ownerId);
+  if (existing) return existing;
+  const profile: CoachProfile = {
+    id: ownerId,
+    full_name: fullName ?? "",
+    phone: "",
+    created_at: new Date().toISOString(),
+  };
+  await db.coach_profiles.put(profile);
+  return profile;
+}
+
+export async function saveCoachProfile(
+  ownerId: string,
+  patch: { full_name?: string; phone?: string },
+): Promise<void> {
+  const current = await ensureCoachProfile(ownerId);
+  await db.coach_profiles.put({
+    ...current,
+    full_name: patch.full_name?.trim() ?? current.full_name,
+    phone: patch.phone?.trim() ?? current.phone,
+    updated_at: new Date().toISOString(),
+  });
+}
+
+/**
+ * Ensures every age group belongs to a club, creating a default club for any
+ * that were made before the club level existed.
+ *
+ * Returns the coach's clubs and groups, ordered by name.
+ */
+export async function loadHierarchy(
+  ownerId: string,
+): Promise<{ clubs: Club[]; groups: Team[] }> {
+  const visible = ownedBy(ownerId);
+
+  let clubs = (await db.clubs.toArray()).filter(visible);
+  let groups = (await db.teams.toArray()).filter(visible);
+
+  const orphans = groups.filter((g) => g.club_id == null);
+
+  if (orphans.length > 0) {
+    // Reuse an existing default club if a previous run already made one.
+    let club = clubs.find((c) => c.name === DEFAULT_CLUB_NAME);
+    if (!club) {
+      const id = (await db.clubs.add({
+        name: DEFAULT_CLUB_NAME,
+        city: "",
+        created_at: new Date().toISOString(),
+        owner_id: ownerId,
+      })) as number;
+      club = { id, name: DEFAULT_CLUB_NAME, city: "", created_at: new Date().toISOString(), owner_id: ownerId };
+      clubs = [...clubs, club];
+    }
+    await db.teams.bulkPut(orphans.map((g) => ({ ...g, club_id: club!.id! })));
+    groups = await db.teams.toArray();
+  }
+
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "ar");
+  return { clubs: clubs.sort(byName), groups: groups.sort(byName) };
+}
+
+/** The full tree: each club with the age groups nested inside it. */
+export function nestGroups(clubs: Club[], groups: Team[]): ClubWithGroups[] {
+  return clubs.map((club) => ({
+    club,
+    groups: groups.filter((g) => g.club_id === club.id),
+  }));
+}
+
+/** Groups with no club, which should be empty once `loadHierarchy` has run. */
+export function unattachedGroups(groups: Team[], clubs: Club[]): Team[] {
+  const known = new Set(clubs.map((c) => c.id));
+  return groups.filter((g) => g.club_id == null || !known.has(g.club_id));
+}
+
+export async function addClub(
+  ownerId: string,
+  name: string,
+  city?: string,
+): Promise<number> {
+  return (await db.clubs.add({
+    name: name.trim(),
+    city: city?.trim() ?? "",
+    created_at: new Date().toISOString(),
+    owner_id: ownerId,
+  })) as number;
+}
+
+export async function updateClub(id: number, patch: Partial<Pick<Club, "name" | "city">>): Promise<void> {
+  await db.clubs.update(id, { ...patch, updated_at: new Date().toISOString() });
+}
+
+/**
+ * Deletes a club. Its age groups are kept (the FK is `on delete set null`) and
+ * reappear under a default club, so a mis-click cannot destroy a squad.
+ */
+export async function deleteClub(clubId: number): Promise<void> {
+  await db.clubs.delete(clubId);
+}

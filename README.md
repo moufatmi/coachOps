@@ -1,36 +1,111 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CoachOps — كوتش أوبس
 
-## Getting Started
+An offline-first Arabic (RTL) web app for football coaches and club managers.
+Roster, training sessions, attendance, tactical lineups, subscriptions and
+expenses — usable on a phone at the pitch with no signal, and installable as a
+PWA.
 
-First, run the development server:
+## Stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | Next.js 16 (App Router), React 19 |
+| Styling | Tailwind CSS v4 |
+| Local data | Dexie / IndexedDB (`CoachOpsDB`), live queries via `useLiveQuery` |
+| Cloud sync | Supabase (Postgres), manual push/pull |
+| PWA | `public/manifest.json` + `public/sw.js` |
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # http://localhost:3000
+npm run build    # production build
+npm run lint     # eslint
+npx tsc --noEmit # type check
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app seeds a sample U15 team on first run, so there is data to explore
+immediately. Settings → *إعادة الضبط* clears it.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Layout
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/                 routes (all client components, offline-first)
+components/          feature components: attendance, finance, lineup,
+                     match, schedule, settings, teams
+lib/offline/         Dexie schema (db.ts), backup/export (data.ts), seed
+lib/supabase/        client + sync engine
+supabase/schema.sql  run once in the Supabase SQL editor (idempotent)
+```
 
-## Learn More
+## How data works
 
-To learn more about Next.js, take a look at the following resources:
+The local Dexie database is the source of truth. Supabase is an optional
+backup/sync target, driven manually from Settings. Sync uses **last-write-wins
+per row** on an `updated_at` column:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Push** stamps any row missing `updated_at` and upserts everything.
+- **Pull** merges row by row and only overwrites a local row when the cloud
+  copy is strictly newer — pulling cannot discard unsynced local edits.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Known limitations, by design:
 
-## Deploy on Vercel
+- **Deletions do not propagate.** There are no tombstones, so a player deleted
+  on one device stays in the cloud and returns on the next pull from another.
+- **IDs must be kept in sync** between devices. Pull before working on a second
+  device.
+- Rows that have never been pushed have no `updated_at` and are always treated
+  as older, so cloud data never clobbers them on the first pull.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Accounts and security
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Sign-in is email/password via Supabase Auth. Every table carries an `owner_id`,
+and Row Level Security policies in `supabase/schema.sql` restrict all access to
+the signed-in coach:
+
+```sql
+create policy "own players" on players for all
+  using (owner_id = (select auth.uid()))
+  with check (owner_id = (select auth.uid()));
+```
+
+Because every other table is reached through a team, the app applies the owner
+filter once — on the team list in `components/team-provider.tsx` — which keeps
+one coach's roster off another coach's screen.
+
+### What this does and does not protect
+
+- **Cloud data is protected.** RLS is enforced server-side, so the anon key in
+  the client bundle cannot read or write another coach's rows, including
+  parents' phone numbers and payment records.
+- **Local data is gated, not encrypted.** Rows live in IndexedDB on the device
+  and keep their `owner_id` on sign-out, so signing back in restores your work
+  and another coach sees an empty app. But this is a UI lock only: anyone with
+  devtools access to that browser profile can read IndexedDB directly. Use
+  device-level protection for a shared phone.
+
+### Adopting pre-auth data
+
+Rows created before auth existed have `owner_id = NULL`. Your first sign-in
+claims any local rows automatically. Rows already pushed to the cloud from
+before auth must be claimed once by hand — see the commented `update` block at
+the end of `supabase/schema.sql`.
+
+## First-time setup
+
+1. Run `supabase/schema.sql` in the Supabase SQL editor.
+2. In Supabase → Authentication → Providers, enable **Email**. Turn off
+   "Confirm email" if you want to skip inbox verification during testing.
+3. Put the project URL and anon key in `.env.local`:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
+   ```
+   Both keys must use `=`. A stray `:` is silently ignored and the variable
+   disappears without warning.
+4. `npm run dev`, create an account, then use Settings → sync.
+
+## License
+
+Private project.
