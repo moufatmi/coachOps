@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { getSupabase } from "@/lib/supabase/client";
+import { getSupabase, getFreshSession } from "@/lib/supabase/client";
 import { claimUnownedRows } from "@/lib/offline/ownership";
 import { wipeLocalData } from "@/lib/offline/data";
 
@@ -70,6 +70,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  /**
+   * Refresh the token when the coach comes back to the tab.
+   *
+   * Supabase's own auto-refresh only runs while the document is visible, so a
+   * tab left open overnight -- or a phone that locked -- came back to an expired
+   * access token and every sync failed with "JWT expired". Refreshing on focus
+   * and on becoming visible means that window is closed in practice.
+   *
+   * The provider's own `onAuthStateChange` subscription picks up the new session,
+   * so no state is set here directly.
+   */
+  useEffect(() => {
+    if (!userId) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void getFreshSession().catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [userId]);
 
   // Adopt any rows created before auth existed. Runs once per signed-in user, and
 // `migrated` gates seeding so demo data is not added on top of a real roster.
@@ -178,5 +203,7 @@ function translateAuthError(message: string): string {
   if (m.includes("password should be")) return "كلمة المرور قصيرة جداً (6 أحرف على الأقل)";
   if (m.includes("rate limit") || m.includes("too many")) return "محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة";
   if (m.includes("fetch")) return "تعذّر الاتصال بالخادم. تحقّق من الإنترنت.";
+  if (m.includes("jwt") && m.includes("expired")) return "انتهت صلاحية الجلسة. أعد تسجيل الدخول.";
+  if (m.includes("refresh")) return "انتهت صلاحية الجلسة. أعد تسجيل الدخول.";
   return message;
 }

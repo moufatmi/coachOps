@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getSupabase, SUPABASE_UNCONFIGURED_MESSAGE } from "./client";
+import { getSupabase, getFreshSession, SUPABASE_UNCONFIGURED_MESSAGE } from "./client";
 import { db, ALL_TABLES, type TableName } from "@/lib/offline/db";
 
 /**
@@ -56,18 +56,26 @@ function stamp(row: SyncRow): number {
 /**
  * Resolves the signed-in coach, or explains why sync is unavailable.
  *
- * Uses `getSession()` rather than `getUser()`. `getUser()` makes a network round
- * trip to /auth/v1/user on every sync and logs a 403 in the console whenever
- * there is no session, which flooded DevTools with noise that looked like a real
- * failure. `getSession()` reads the already-held session, which is what the RLS
- * policies evaluate against anyway; a genuinely expired token still fails the
- * request below with a real error.
+ * Reads the session through `getFreshSession`, which refreshes an expired access
+ * token first. This is what fixes the "JWT expired" wall: `getSession()` returns
+ * whatever token is cached without checking it, and Supabase access tokens last
+ * one hour. The library's own auto-refresh only runs while the document is
+ * visible, so a coach who closed the tab or locked the phone came back to a long
+ * expired token and every table request 401'd -- the app looked broken and the
+ * data was fine.
+ *
+ * Returns null when the session really is gone (signed out, or the refresh token
+ * itself rejected), which is the only case that should ask for a sign-in.
  */
 async function currentUserId(supabase: SupabaseClient | null): Promise<SessionCheck> {
   if (!supabase) return { ok: false, error: SUPABASE_UNCONFIGURED_MESSAGE };
-  const { data } = await supabase.auth.getSession();
-  const user = data.session?.user;
-  if (!user) return { ok: false, error: "يجب تسجيل الدخول قبل المزامنة" };
+  const user = (await getFreshSession())?.user;
+  if (!user) {
+    return {
+      ok: false,
+      error: "انتهت صلاحية الجلسة. سجّل الدخول من جديد للمتابعة.",
+    };
+  }
   return { ok: true, uid: user.id };
 }
 

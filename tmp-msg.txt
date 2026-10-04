@@ -1,43 +1,22 @@
-feat: training/match modes, and an archive grouped by season
+fix: expired session no longer breaks every sync
 
-Two features, both driven by the same observation: the app had grown into one
-long menu where a coach at the touchline had to scroll past subscriptions to
-reach the lineup, and last season's numbers were indistinguishable from this
-season's.
+Sync reported "JWT expired" once for every table, which read as a broken app.
 
-Modes
+Not a Supabase problem and not a key problem: the anon key in .env.local is
+valid to 2036. Supabase access tokens last one hour, and
+`supabase.auth.getSession()` returns the cached token without validating it. The
+library's background auto-refresh only runs while the document is visible, so
+closing the tab or locking a phone was enough to come back to a token that had
+been dead for hours -- every request then 401'd, one error per table.
 
-Two big targets at the top of the sidebar, FC-menu style, replacing the flat
-menu:
-
-- Training — overview, players, schedule, attendance, finance
-- Match — match centre only (XI, clock, result)
-
-The lineup page's own "training mode / official match" toggle is gone. It only
-ever toggled the match timer's visibility, so it was a second, contradictory
-place to express the same choice the new top-level mode now makes.
-
-The mode is persisted to localStorage and read via useSyncExternalStore rather
-than useState + useEffect, so the correct menu renders on the first paint and
-two open tabs stay in step.
-
-Archive
-
-Read-only history grouped by season. Nothing is deleted or moved: a coach ends
-a season by creating the next season's age group in Settings, and the old rows
-stay under the old heading.
-
-Season is derived from the owning team's `season` string rather than stored on
-sessions and lineups, which keeps it consistent with how groups are already
-named. Shows sessions (with attendance counts) and matches (with results), with
-a season picker, a text search, per-season W-D-L and goal totals, and toggles to
-show one kind or the other.
-
-Two counting rules worth keeping, both verified by assertions against
-lib/offline/archive.ts:
-
-- a lineup with only one of goals_for/goals_against is a half-entered result and
-  is listed but excluded from the record; counting it would silently invent 0-0
-  draws
-- a session with no attendance rows reads as "never marked", not "0 present of
-  0", which would imply everyone turned up
+- getFreshSession() refreshes the access token when it is within 120s of expiry,
+  rather than discovering it is dead on the first failed request
+- the slack is deliberate: a sync touches nine tables, so a token that was valid
+  at the start can expire part way through
+- sync resolves the session through it, so the nine "JWT expired" errors become
+  either a successful sync or one honest message
+- refresh on window focus and on returning to the tab, which closes the window
+  in practice rather than relying on the library's visibility-gated timer
+- when the refresh token itself is rejected, sign out locally so the app stops
+  showing a session it cannot use, and say so in Arabic instead of returning the
+  raw Supabase message
