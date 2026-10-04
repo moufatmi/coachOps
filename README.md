@@ -12,8 +12,12 @@ PWA.
 | Framework | Next.js 16 (App Router), React 19 |
 | Styling | Tailwind CSS v4 |
 | Local data | Dexie / IndexedDB (`CoachOpsDB`), live queries via `useLiveQuery` |
-| Cloud sync | Supabase (Postgres), manual push/pull |
+| Cloud sync | Supabase (Postgres), auto-push + manual pull |
+| Auth | Supabase Auth, coach-scoped RLS |
 | PWA | `public/manifest.json` + `public/sw.js` |
+
+> **Developers:** see [ARCHITECTURE.md](./ARCHITECTURE.md) for the data model,
+> sync semantics, provider layering, and a list of footguns that fail silently.
 
 ## Getting started
 
@@ -34,16 +38,20 @@ immediately. Settings → *إعادة الضبط* clears it.
 app/                 routes (all client components, offline-first)
 components/          feature components: attendance, finance, lineup,
                      match, schedule, settings, teams
-lib/offline/         Dexie schema (db.ts), backup/export (data.ts), seed
+lib/offline/         Dexie schema (db.ts), hierarchy, ownership, backup, seed
 lib/supabase/        client + sync engine
 supabase/schema.sql  run once in the Supabase SQL editor (idempotent)
 ```
 
 ## How data works
 
+Everything belongs to one coach, arranged as **coach ▸ club ▸ age group ▸ squad
+and activity**.
+
 The local Dexie database is the source of truth. Supabase is an optional
-backup/sync target, driven manually from Settings. Sync uses **last-write-wins
-per row** on an `updated_at` column:
+backup/sync target; changes upload automatically about 10 seconds after you make
+them, and Settings has manual push/pull. Sync uses **last-write-wins per row** on
+an `updated_at` column:
 
 - **Push** stamps any row missing `updated_at` and upserts everything.
 - **Pull** merges row by row and only overwrites a local row when the cloud
@@ -70,9 +78,9 @@ create policy "own players" on players for all
   with check (owner_id = (select auth.uid()));
 ```
 
-Because every other table is reached through a team, the app applies the owner
-filter once — on the team list in `components/team-provider.tsx` — which keeps
-one coach's roster off another coach's screen.
+Because every other table is reached through an age group, the app applies the
+owner filter once — on the team list in `components/pyramid-provider.tsx` — which
+keeps one coach's roster off another coach's screen.
 
 ### What this does and does not protect
 
