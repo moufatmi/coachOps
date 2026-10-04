@@ -194,6 +194,10 @@ alter table clubs       add column if not exists owner_id uuid references auth.u
 -- or the index below fails with `column "club_id" does not exist`.
 alter table teams add column if not exists club_id bigint references clubs(id) on delete set null;
 
+-- Default monthly subscription per age group (dirhams). A club may charge
+-- younger players less, so this lives on the group rather than being global.
+alter table teams add column if not exists monthly_fee numeric;
+
 create index if not exists idx_teams_club on teams(club_id);
 
 create index if not exists idx_teams_owner       on teams(owner_id);

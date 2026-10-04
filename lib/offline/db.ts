@@ -142,8 +142,17 @@ export interface Team extends Owned {
   season: string;
   /** The club this age group belongs to. Null only for pre-club rows. */
   club_id?: number | null;
+  /**
+   * Default monthly subscription in dirhams, used when creating a player's
+   * cotisation for a new month. Per age group because a club may charge
+   * younger players less. Null falls back to FALLBACK_MONTHLY_FEE.
+   */
+  monthly_fee?: number | null;
   created_at: string;
 }
+
+/** Used when a group has no fee configured. */
+export const FALLBACK_MONTHLY_FEE = 200;
 
 export interface Player extends Owned {
   team_id: number;

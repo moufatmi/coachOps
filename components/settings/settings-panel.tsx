@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil, CalendarDays } from "lucide-react";
-import { db, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
+import { db, FALLBACK_MONTHLY_FEE, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
 import { exportAllData, importAllData, resetAllData, deleteTeamCascade, findProbablyEmptySessions, deleteSessions, type EmptySessionScan } from "@/lib/offline/data";
 import { useSync } from "@/components/sync-provider";
 import { SyncIndicator } from "@/components/sync-indicator";
@@ -75,6 +75,7 @@ export default function SettingsPanel() {
   const { pushNow, pullNow, busy, state, error, lastSyncedAt } = useSync();
   const [category, setCategory] = useState<TeamCategory>("U15");
   const [season, setSeason] = useState("2026/2027");
+  const [fee, setFee] = useState("");
   const [msg, setMsg] = useState("");
 
   // Categories already in use by this coach, fed into the picker as suggestions.
@@ -129,6 +130,9 @@ export default function SettingsPanel() {
       name: suggestGroupName(category, season),
       category: category.trim(),
       season,
+      // Blank means "use the fallback", stored as null so the default can change
+      // later without stranding the group on a stale number.
+      monthly_fee: fee.trim() && Number.isFinite(Number(fee)) ? Number(fee) : null,
       club_id: clubId,
       created_at: new Date().toISOString(),
       owner_id: user?.id,
@@ -151,6 +155,24 @@ export default function SettingsPanel() {
   async function moveTeam(team: Team, clubId: string) {
     const target = clubId ? Number(clubId) : null;
     await db.teams.update(team.id!, { club_id: target, updated_at: new Date().toISOString() });
+  }
+
+  /** Sets the default monthly subscription for an age group. */
+  async function saveFee(team: Team, raw: string) {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      await db.teams.update(team.id!, {
+        monthly_fee: null,
+        updated_at: new Date().toISOString(),
+      });
+      return;
+    }
+    const value = Number(trimmed);
+    if (!Number.isFinite(value) || value < 0) return;
+    await db.teams.update(team.id!, {
+      monthly_fee: value,
+      updated_at: new Date().toISOString(),
+    });
   }
 
   async function removeClub(id: number, clubName: string) {
@@ -341,6 +363,18 @@ export default function SettingsPanel() {
               className="mt-1 w-28 rounded-lg border px-3 py-2 text-sm"
             />
           </label>
+          <label className="text-xs text-slate-500">
+            الاشتراك الشهري (درهم)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={fee}
+              onChange={(e) => setFee(e.target.value)}
+              placeholder={String(FALLBACK_MONTHLY_FEE)}
+              className="mt-1 w-28 rounded-lg border px-3 py-2 text-sm"
+            />
+          </label>
           {/* Preview of the name that will be generated, so the derivation is
               visible before saving rather than surprising afterwards. */}
           <div className="basis-full text-xs text-slate-400">
@@ -364,6 +398,19 @@ export default function SettingsPanel() {
                 </span>
               </span>
               <span className="flex items-center gap-2">
+                <label className="flex items-center gap-1 text-xs text-slate-500">
+                  الاشتراك الشهري
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    defaultValue={t.monthly_fee ?? ""}
+                    onBlur={(e) => void saveFee(t, e.target.value)}
+                    placeholder={String(FALLBACK_MONTHLY_FEE)}
+                    aria-label={`الاشتراك الشهري لـ ${t.name}`}
+                    className="w-20 rounded border px-2 py-1 text-xs"
+                  />
+                </label>
                 <select
                   value={t.club_id ?? ""}
                   onChange={(e) => void moveTeam(t, e.target.value)}

@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { Receipt, AlertTriangle, Plus, X, Search, ChevronRight, ChevronLeft, Users } from "lucide-react";
 import {
   db,
+  FALLBACK_MONTHLY_FEE,
   type Cotisation,
   type CotisationStatus,
   type PaymentMethod,
@@ -25,8 +26,6 @@ import {
   subscriptionTotals,
   type SubscriptionRow,
 } from "@/lib/offline/finance";
-
-const DEFAULT_FEE = 200;
 
 const STATUS_FILTERS: Array<{ value: CotisationStatus | "all"; label: string }> = [
   { value: "all", label: "الكل" },
@@ -50,6 +49,17 @@ export default function SubscriptionsTracker({
   const { teams, selectedTeamId } = useTeam();
   const ownerId = useOwnerId();
   const team = teams.find((t) => t.id === selectedTeamId);
+  const selectedGroup = teams.find((t) => t.id === selectedTeamId);
+
+  /**
+   * The fee this age group charges per month, configured in Settings. Only used
+   * when *creating* a player's cotisation for a month -- existing rows keep the
+   * amount agreed at the time, so changing the fee never rewrites past months.
+   */
+  const monthlyFee =
+    typeof selectedGroup?.monthly_fee === "number" && selectedGroup.monthly_fee > 0
+      ? selectedGroup.monthly_fee
+      : FALLBACK_MONTHLY_FEE;
 
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<CotisationStatus | "all">("all");
@@ -87,7 +97,7 @@ export default function SubscriptionsTracker({
             player_id: p.id,
             month,
             season: team?.season ?? "2026/2027",
-            expected_amount: DEFAULT_FEE,
+            expected_amount: monthlyFee,
             paid_amount: 0,
             status: "unpaid",
             created_at: new Date().toISOString(),
@@ -96,7 +106,7 @@ export default function SubscriptionsTracker({
         }
       }
     })();
-  }, [players, month, selectedTeamId, team?.season, ownerId]);
+  }, [players, month, selectedTeamId, team?.season, ownerId, monthlyFee]);
 
   const rows = useMemo<SubscriptionRow[]>(() => {
     const byPlayer = new Map<number, Cotisation>();
@@ -124,7 +134,7 @@ export default function SubscriptionsTracker({
 
   function openPayment(player: Player, cot: Cotisation) {
     setPaying({ player, cot });
-    setAmount(String(Math.max(cot.expected_amount - cot.paid_amount, 0) || DEFAULT_FEE));
+    setAmount(String(Math.max(cot.expected_amount - cot.paid_amount, 0) || monthlyFee));
     setMethod("نقدي");
     setReceipt("");
     setPayDate(new Date().toISOString().slice(0, 10));
