@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil, CalendarDays } from "lucide-react";
+import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil, Settings2 } from "lucide-react";
 import { db, FALLBACK_MONTHLY_FEE, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory , newId } from "@/lib/offline/db";
-import { exportAllData, importAllData, resetAllData, deleteTeamCascade, findProbablyEmptySessions, deleteSessions, localDataStats, type EmptySessionScan } from "@/lib/offline/data";
+import { exportAllData, importAllData, resetAllData, deleteTeamCascade } from "@/lib/offline/data";
 import { useSync } from "@/components/sync-provider";
 import { SyncIndicator } from "@/components/sync-indicator";
-import { summarize } from "@/lib/supabase/sync";
 import { useAuth } from "@/components/auth-provider";
 import { seedDatabase } from "@/lib/offline/seed";
 import { usePyramid } from "@/components/pyramid-provider";
-import { ALL_TABLES } from "@/lib/offline/db";
 import { addClub, saveCoachProfile, deleteClub, suggestGroupName } from "@/lib/offline/hierarchy";
 
 /**
@@ -73,7 +71,7 @@ export default function SettingsPanel() {
   const { groups } = usePyramid();
   const { user, deleteAccount } = useAuth();
   const { profile, clubs, selectedClubId, selectClub } = usePyramid();
-  const { pushNow, pullNow, syncNow, busy, state, error, lastSyncedAt } = useSync();
+  const { syncNow, busy, error, lastSyncedAt } = useSync();
   const [category, setCategory] = useState<TeamCategory>("U15");
   const [season, setSeason] = useState("2026/2027");
   const [fee, setFee] = useState("");
@@ -88,28 +86,6 @@ export default function SettingsPanel() {
   const [clubName, setClubName] = useState("");
   const [clubCity, setClubCity] = useState("");
 
-  // Cleanup for sessions the old attendance page created implicitly.
-  const [scan, setScan] = useState<EmptySessionScan | null>(null);
-  const groupName = (teamId?: string | null) =>
-    groups.find((g) => g.id === teamId)?.name ?? "فئة محذوفة";
-
-  async function scanEmpty() {
-    setScan(await findProbablyEmptySessions());
-  }
-
-  const [stats, setStats] = useState<Record<string, number> | null>(null);
-
-  async function loadStats() {
-    setStats(await localDataStats());
-  }
-
-  // Deferred so the initial render matches the server's and the setState does
-  // not run during commit.
-  useEffect(() => {
-    const t = setTimeout(() => void loadStats(), 0);
-    return () => clearTimeout(t);
-  }, []);
-
   async function removeAccount() {
     const typed = prompt(
       "لتأكيد الحذف النهائي، اكتب: حذف حسابي\n\nسيُحذف حسابك وكل بياناتك من السحابة ومن هذا الجهاز.",
@@ -121,18 +97,6 @@ export default function SettingsPanel() {
     } catch (e: unknown) {
       setMsg(`تعذّر حذف الحساب: ${e instanceof Error ? e.message : "خطأ غير معروف"}`);
     }
-  }
-
-  async function purgeEmpty() {
-    if (!scan || scan.empty.length === 0) return;
-    const withAttendance = scan.attendanceRows > 0;
-    const warning = withAttendance
-      ? `\n\nسيُحذف أيضاً ${scan.attendanceRows} سجل حضور مرتبط بها.`
-      : "";
-    if (!confirm(`حذف ${scan.empty.length} حصة فارغة؟${warning}`)) return;
-    await deleteSessions(scan.empty.map((s) => s.id!).filter(Boolean));
-    setMsg(`تم حذف ${scan.empty.length} حصة فارغة`);
-    setScan(null);
   }
 
   async function createClub(e: React.FormEvent) {
@@ -245,24 +209,18 @@ export default function SettingsPanel() {
     setMsg("تمت إضافة البيانات التجريبية");
   }
 
-  // Push/pull go through SyncProvider so manual and automatic syncs share one
-  // path (and the header indicator reflects the outcome).
-  async function doPush() {
-    const report = await pushNow();
-    setMsg(report ? summarize(report) : "تعذّر إتمام الرفع (طلب متزامن أو الشبكة غير متاحة).");
-  }
-
-  /** Full two-way reconciliation — the action to use on a second device. */
+  /**
+   * One button, both directions.
+   *
+   * Separate push and pull buttons were removed: they invited the wrong one, and
+   * push-only is what made a second device look empty even though the data was
+   * sitting in Supabase. syncNow() pulls before it pushes, which is the only order
+   * that converges.
+   */
   async function doSync() {
     setMsg("جارٍ المزامنة مع السحابة…");
     await syncNow();
-    setMsg("تمت المزامنة مع السحابة ☁️ (جلب ثم رفع)");
-  }
-
-  async function doPull() {
-    if (!confirm("سيتم تحديث البيانات المحلية من السحابة (لن تُحذف تعديلاتك الأحدث). هل أنت متأكد؟")) return;
-    const report = await pullNow();
-    setMsg(report ? summarize(report) : "تعذّر إتمام الجلب (طلب متزامن أو الشبكة غير متاحة).");
+    setMsg("تمت المزامنة مع السحابة ☁️");
   }
 
   const playersPerTeam = useLiveQuery(async () => {
@@ -478,62 +436,11 @@ export default function SettingsPanel() {
         </ul>
       </section>
 
-      <section className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-        <h3 className="flex items-center gap-2 font-bold text-amber-900">
-          <CalendarDays size={18} /> حصص فارغة
-        </h3>
-        <p className="mt-1 text-sm text-amber-800">
-          في نسخة سابقة، كان فتح صفحة «تسجيل الحضور» يُنشئ حصة فارغة في الجدول تلقائياً.
-          يمكنك مراجعة هذه الحصص وحذفها.
-        </p>
-
-        {scan == null ? (
-          <button
-            onClick={scanEmpty}
-            className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm text-amber-900 hover:bg-amber-100"
-          >
-            فحص الحصص الفارغة
-          </button>
-        ) : scan.empty.length === 0 ? (
-          <p className="mt-3 text-sm text-emerald-700">لا توجد حصص فارغة. كل شيء على ما يرام ✓</p>
-        ) : (
-          <>
-            <p className="mt-3 text-sm text-amber-900">
-              وُجدت <b>{scan.empty.length}</b> حصة بدون وقت أو مكان أو ملاحظات
-              {scan.attendanceRows > 0 && (
-                <>، و<span className="font-bold">{scan.attendanceRows}</span> سجل حضور مرتبط بها سيُحذف معها.</>
-              )}
-              .
-            </p>
-            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-amber-800">
-              {scan.empty.map((s) => (
-                <li key={s.id} className="flex justify-between border-b border-amber-200 py-1">
-                  <span>{s.date}</span>
-                  <span>{groupName(s.team_id)}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={purgeEmpty}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
-              >
-                حذف {scan.empty.length} حصة
-              </button>
-              <button
-                onClick={scanEmpty}
-                className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm text-amber-900 hover:bg-amber-100"
-              >
-                إعادة الفحص
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-
       <section className="rounded-xl bg-white border p-5">
         <h3 className="flex items-center gap-2 font-bold"><Database size={18} /> النسخ الاحتياطي</h3>
-        <p className="mt-1 text-sm text-slate-500">احفظ بياناتك بشكل دوري حتى لا تضيع عند تغيير الجهاز أو المتصفح.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          بياناتك تُرفع تلقائياً إلى حسابك، لكن ملف نسخة احتياطية مفيد إن أردت نقلها إلى جهاز آخر.
+        </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={doExport} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50"><Download size={16} /> تصدير نسخة</button>
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50">
@@ -546,8 +453,8 @@ export default function SettingsPanel() {
       <section className="rounded-xl bg-white border p-5">
         <h3 className="flex items-center gap-2 font-bold"><Database size={18} /> المزامنة مع السحابة</h3>
         <p className="mt-1 text-sm text-slate-500">
-          المزامنة تلقائية: أي تعديل يُرفع بعد 10 ثوانٍ. يمكنك أيضاً الرفع أو الجلب يدوياً.
-          تعتمد على الأحدث تعديلاً لكل سجل، وكل صف مرتبط بحسابك ولا يراه أحد غيرك.
+          تتم المزامنة تلقائياً. عند فتح التطبيق، أو العودة إليه، أو الاتصال بالإنترنت، تتحدث بياناتك في الاتجاهين.
+          كل صف مرتبط بحسابك ولا يراه أحد غيرك.
         </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -555,6 +462,11 @@ export default function SettingsPanel() {
           {user && (
             <span className="text-xs text-slate-500">
               الحساب: <span className="font-medium text-slate-700">{user.email}</span>
+            </span>
+          )}
+          {lastSyncedAt && (
+            <span className="text-xs text-slate-400">
+              آخر مزامنة: {new Date(lastSyncedAt).toLocaleTimeString("ar")}
             </span>
           )}
         </div>
@@ -565,21 +477,10 @@ export default function SettingsPanel() {
           </p>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4">
           <button onClick={doSync} disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50">
-            مزامنة الآن
+            {busy ? "جارٍ المزامنة…" : "مزامنة الآن"}
           </button>
-          <button onClick={doPush} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
-            {busy && state === "syncing" ? "جارٍ الرفع…" : "رفع إلى السحابة"}
-          </button>
-          <button onClick={doPull} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
-            {busy && state === "syncing" ? "جارٍ الجلب…" : "جلب من السحابة"}
-          </button>
-          {lastSyncedAt && (
-            <span className="self-center text-xs text-slate-400">
-              آخر مزامنة: {new Date(lastSyncedAt).toLocaleTimeString("ar")}
-            </span>
-          )}
         </div>
       </section>
 
@@ -592,19 +493,7 @@ export default function SettingsPanel() {
           <a href="/privacy" className="text-emerald-700 hover:underline">سياسة الخصوصية</a>
           <span className="text-slate-300">·</span>
           <a href="/terms" className="text-emerald-700 hover:underline">شروط الاستخدام</a>
-          <button onClick={loadStats} className="text-xs text-slate-500 hover:underline">
-            تحديث
-          </button>
         </div>
-
-        {stats && (
-          <p className="mt-2 text-xs text-slate-500">
-            بياناتك على هذا الجهاز:{" "}
-            {ALL_TABLES.filter((t) => (stats[t] ?? 0) > 0)
-              .map((t) => `${t}: ${stats[t]}`)
-              .join(" · ") || "لا توجد بيانات"}
-          </p>
-        )}
 
         <div className="mt-4 border-t pt-4">
           <p className="text-sm font-semibold text-red-700">حذف الحساب نهائياً</p>
@@ -621,13 +510,28 @@ export default function SettingsPanel() {
         </div>
       </section>
 
-      <section className="rounded-xl bg-white border border-red-200 p-5">
-        <h3 className="flex items-center gap-2 font-bold text-red-700"><Trash2 size={18} /> إعادة الضبط</h3>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button onClick={doSeed} className="rounded-lg border px-4 py-2 text-sm hover:bg-slate-50">تحميل بيانات تجريبية</button>
-          <button onClick={doReset} className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700">مسح كل البيانات</button>
+      {/* Maintenance, not a coach workflow. Collapsed so it cannot be hit by
+          accident -- "wipe everything" sitting next to "add a club" was a real
+          misclick waiting to happen. Deleting the cloud account is the normal
+          way out and lives above. */}
+      <details className="rounded-xl border border-slate-200 bg-white">
+        <summary className="flex cursor-pointer items-center gap-2 px-5 py-4 text-sm font-bold text-slate-600">
+          <Settings2 size={16} /> أدوات متقدمة
+        </summary>
+        <div className="border-t px-5 py-4">
+          <p className="text-sm text-slate-500">
+            للاختبار والصيانة. لا تحتاج إليها في الاستخدام اليومي.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={doSeed} className="rounded-lg border px-4 py-2 text-sm hover:bg-slate-50">
+              تحميل بيانات تجريبية
+            </button>
+            <button onClick={doReset} className="inline-flex items-center gap-2 rounded-lg border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50">
+              <Trash2 size={16} /> مسح كل البيانات
+            </button>
+          </div>
         </div>
-      </section>
+      </details>
     </div>
   );
 }

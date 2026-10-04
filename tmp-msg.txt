@@ -1,29 +1,25 @@
-refactor: one attendance screen instead of two
+refactor: strip Settings down to what a coach actually uses
 
-Attendance was reachable from two places with the same purpose and different
-capabilities, which made the app feel broken rather than feature-rich:
+The panel had grown to seven sections, three of which were either developer
+scaffolding or actively dangerous sitting next to everyday controls.
 
-- the schedule's session modal could mark statuses for any date, but had no
-  WhatsApp report and a cramped list layout
-- /attendance had the big tap cards and the WhatsApp report, but was hardcoded
-  to today, so a forgotten session could never be filled in afterwards
+Removed:
 
-Neither was a superset, so a coach had to learn which one to reach for. The
-standalone page is the better interface for the common case -- marking a squad
-at the door, one-handed, players queueing -- so it survives and gains the
-missing capability instead.
+- "Empty sessions" cleanup. It repaired a bug where opening the attendance page
+  silently created a session every day. That bug is fixed, so the tool is a
+  one-time migration with no audience left. findProbablyEmptySessions(),
+  deleteSessions() and localDataStats() went with it.
+- Separate "push to cloud" / "pull from cloud" buttons. They invited the wrong
+  one -- push-only is precisely what made a second device look empty while the
+  data sat in Supabase. One "sync now" button does both, in the correct order.
+- A raw row-count readout (clubs: 1, players: 18, sessions: 42...). Debug
+  output, not information a coach acts on.
+- "Reset" as a top-level red section, with "load demo data" beside it. It is
+  now collapsed under "advanced tools", because a wipe-everything button at the
+  same visual weight as "add a club" is a misclick waiting to happen. Deleting
+  the cloud account remains the visible way out.
 
-- /attendance now has a session picker defaulting to today, covering any date
-- the schedule links to /attendance?session=<id> for that session
-- the schedule keeps a read-only "✓ present/squad" badge per row, so it can
-  still answer "who turned up?" without becoming a second editor
-- the WhatsApp report now dates itself from the selected session rather than
-  from today, which was wrong as soon as a past session could be opened
-- components/schedule/session-detail.tsx deleted
+Reworded the sync description to state what actually happens now (automatic,
+both directions) rather than advertising manual push and pull.
 
-Data is unaffected: both screens always wrote to the same attendance rows, so
-this only removes an interface.
-
-The URL param is read with useSearchParams inside a Suspense boundary rather
-than in an effect, so opening a past session does not flash today's screen
-first.
+No data or behaviour change to anything a coach relies on.
