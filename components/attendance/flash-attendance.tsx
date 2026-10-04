@@ -325,7 +325,18 @@ function AttendanceScreen() {
                 style.card,
               )}
             >
-              <span className="text-3xl font-black">#{p.jersey_number}</span>
+              {/* Face when there is one. The shirt number stays as the fallback
+                  because at a glance a coach tracks players by number. */}
+              {p.photo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={p.photo_url}
+                  alt={p.full_name}
+                  className="h-20 w-20 rounded-full border-2 border-white object-cover shadow"
+                />
+              ) : (
+                <span className="text-3xl font-black">#{p.jersey_number}</span>
+              )}
               <span className="mt-1 text-sm font-bold leading-tight">{p.full_name}</span>
               <span className="text-xs opacity-80">{p.position}</span>
               <span className="mt-2 rounded-full bg-white/70 px-2 py-0.5 text-xs font-semibold">

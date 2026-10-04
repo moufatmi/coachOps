@@ -48,6 +48,11 @@ create table if not exists players (
   position text,
   parent_phone text,
   status text default 'نشط',
+  -- Player photos are stored inline as a base64 JPEG data URL, not as a
+  -- Supabase Storage object URL. The app is offline-first, so a bucket upload
+  -- would leave a coach with no photo until they got signal; inline, the photo
+  -- rides along with the existing row sync for free. Images are re-encoded to a
+  -- 256px thumbnail on the device before being stored (lib/offline/photo.ts).
   photo_url text,
   birth_date date
 );

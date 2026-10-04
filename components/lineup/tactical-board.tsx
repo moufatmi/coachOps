@@ -646,7 +646,15 @@ export default function TacticalBoard() {
                       selectedSlotKey === slot.key && "ring-4 ring-yellow-300",
                     )}
                   >
-                    <span className="text-lg font-black">{player ? `#${player.jersey_number}` : "?"}</span>
+                    {/* The photo replaces the shirt number; the number moves to the
+                        label below so a face on the pitch is still identifiable
+                        from the sideline. */}
+                    {player?.photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={player.photo_url} alt={player.full_name} className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      <span className="text-lg font-black">{player ? `#${player.jersey_number}` : "?"}</span>
+                    )}
                     {isCaptain && (
                       <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-400 text-[10px] font-bold text-black">
                         C
@@ -683,9 +691,20 @@ export default function TacticalBoard() {
               onPointerDown={(e) => onBenchPointerDown(e)}
               onPointerUp={(e) => onBenchPointerUp(e, p.id!)}
               onClick={() => onBenchTap(p)}
-              className="rounded-lg border bg-white px-3 py-2 text-sm shadow-sm hover:shadow transition touch-none"
+              className="flex items-center gap-2 rounded-lg border bg-white px-2 py-1.5 text-sm shadow-sm hover:shadow transition touch-none"
             >
-              #{p.jersey_number} {shortName(p.full_name)} — {p.position}
+              {p.photo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={p.photo_url} alt={p.full_name} className="h-8 w-8 shrink-0 rounded-full object-cover" />
+              ) : (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-900 text-[10px] font-black text-white">
+                  #{p.jersey_number}
+                </span>
+              )}
+              <span className="text-start">
+                {shortName(p.full_name)}
+                <span className="block text-[10px] text-slate-400">{p.position}</span>
+              </span>
             </button>
           ))}
         </div>

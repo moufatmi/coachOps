@@ -1,25 +1,24 @@
-refactor: strip Settings down to what a coach actually uses
+feat: player photos
 
-The panel had grown to seven sections, three of which were either developer
-scaffolding or actively dangerous sitting next to everyday controls.
+Coaches recognise players by face, not by shirt number. Photos now appear on the
+squad card, the player profile, the pitch, the bench and the attendance tiles.
 
-Removed:
+Stored inline on players.photo_url as a base64 JPEG data URL rather than a
+Supabase Storage object URL, because this app is offline-first: a bucket upload
+needs connectivity, so a photo added at training would show nothing until the
+coach got signal. Inline, it rides along with the row sync already in place, so
+the picture is on the second device with everything else.
 
-- "Empty sessions" cleanup. It repaired a bug where opening the attendance page
-  silently created a session every day. That bug is fixed, so the tool is a
-  one-time migration with no audience left. findProbablyEmptySessions(),
-  deleteSessions() and localDataStats() went with it.
-- Separate "push to cloud" / "pull from cloud" buttons. They invited the wrong
-  one -- push-only is precisely what made a second device look empty while the
-  data sat in Supabase. One "sync now" button does both, in the correct order.
-- A raw row-count readout (clubs: 1, players: 18, sessions: 42...). Debug
-  output, not information a coach acts on.
-- "Reset" as a top-level red section, with "load demo data" beside it. It is
-  now collapsed under "advanced tools", because a wipe-everything button at the
-  same visual weight as "add a club" is a misclick waiting to happen. Deleting
-  the cloud account remains the visible way out.
+Sizes are kept down on the device (lib/offline/photo.ts): centre-cropped square
+because every consumer is a circle, 256px, JPEG q0.82, stepping quality down
+until under 400KB. A squad of 25 is a few hundred KB. Decoding prefers
+createImageBitmap so a 12MP camera photo does not block the main thread, falling
+back to an <img> for WebViews that lack it.
 
-Reworded the sync description to state what actually happens now (automatic,
-both directions) rather than advertising manual push and pull.
+Every avatar falls back to the shirt number. At 48px on a pitch, circles sit
+adjacent to each other and a face is easier to track than initials; the number is
+still what a coach calls out, so it stays in the label under the marker.
 
-No data or behaviour change to anything a coach relies on.
+Also fixes the edit path, which previously wrote photo_url only on insert --
+editing a player could never attach a photo, so "add a picture" would have
+looked broken.

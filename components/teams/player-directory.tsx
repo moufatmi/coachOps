@@ -8,6 +8,8 @@ import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { attendanceCountsFor } from "@/lib/offline/attendance";
 import PlayerProfileModal from "./player-profile-modal";
+import PlayerPhotoPicker from "./player-photo-picker";
+import PlayerAvatar from "./player-avatar";
 
 const POSITIONS: PlayerPosition[] = [
   "حارس مرمى",
@@ -53,6 +55,12 @@ export default function PlayerDirectory() {
   const [editing, setEditing] = useState<Player | null>(null);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  /**
+   * The photo is held outside the form object on purpose. It is a long base64
+   * string, and spreading it through `setForm` would re-render and re-copy it on
+   * every keystroke in the name field.
+   */
+  const [photo, setPhoto] = useState("");
   const [formError, setFormError] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
 
@@ -80,6 +88,7 @@ export default function PlayerDirectory() {
   function openAdd() {
     setEditing(null);
     setForm(emptyForm);
+    setPhoto("");
     setFormError("");
     setAdding(true);
   }
@@ -94,6 +103,7 @@ export default function PlayerDirectory() {
       birth_date: p.birth_date ?? "",
       status: p.status,
     });
+    setPhoto(p.photo_url ?? "");
     setAdding(true);
   }
 
@@ -120,6 +130,9 @@ export default function PlayerDirectory() {
           parent_phone: form.parent_phone,
           birth_date: form.birth_date,
           status: form.status,
+          // Set on both paths: editing a player is also how a photo gets
+          // attached, and skipping it here made "add a photo" a no-op.
+          photo_url: photo,
         });
       } else {
         await db.players.add({
@@ -131,7 +144,7 @@ export default function PlayerDirectory() {
           parent_phone: form.parent_phone,
           birth_date: form.birth_date,
           status: form.status,
-          photo_url: "",
+          photo_url: photo,
           owner_id: ownerId,
         });
       }
@@ -172,10 +185,18 @@ export default function PlayerDirectory() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((p) => (
-          <div key={p.id} className="rounded-xl border bg-white p-4 shadow-sm cursor-pointer hover:shadow transition" onClick={() => setSelectedPlayer(p)}>
-            <div className="flex items-center justify-between">
-              <p className="font-bold">#{p.jersey_number} {p.full_name}</p>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_BADGE[p.status]}`}>{p.status}</span>
+          <div key={p.id} className="flex gap-3 rounded-xl border bg-white p-4 shadow-sm cursor-pointer hover:shadow transition" onClick={() => setSelectedPlayer(p)}>
+            <PlayerAvatar
+              photo={p.photo_url}
+              name={p.full_name}
+              jerseyNumber={p.jersey_number}
+              className="h-14 w-14 text-sm"
+              ring="ring-1 ring-slate-200"
+            />
+            <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="truncate font-bold">#{p.jersey_number} {p.full_name}</p>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_BADGE[p.status]}`}>{p.status}</span>
             </div>
             <p className="text-sm text-slate-500">{p.position}{p.birth_date ? ` · تاريخ الميلاد: ${p.birth_date}` : ""}</p>
             {(() => {
@@ -200,6 +221,7 @@ export default function PlayerDirectory() {
                 <Trash2 size={12} /> حذف
               </button>
             </div>
+            </div>
           </div>
         ))}
       </div>
@@ -209,6 +231,12 @@ export default function PlayerDirectory() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <form onSubmit={saveForm} className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-3">
             <h4 className="font-bold">{editing ? "تعديل اللاعب" : "إضافة لاعب"}</h4>
+            <PlayerPhotoPicker
+              photo={photo}
+              onChange={setPhoto}
+              fallback={form.jersey_number ? `#${form.jersey_number}` : "؟"}
+              label={form.full_name || "اللاعب"}
+            />
             <label className="block text-sm font-medium">الاسم الكامل<input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" required /></label>
             <label className="block text-sm font-medium">رقم القميص<input type="number" value={form.jersey_number} onChange={(e) => setForm({ ...form, jersey_number: e.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" required /></label>
             <label className="block text-sm font-medium">المركز

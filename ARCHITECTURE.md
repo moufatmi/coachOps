@@ -84,7 +84,7 @@ AuthProvider          → who is signed in
 ## 4. Local data (Dexie)
 
 `lib/offline/db.ts` defines all types and the schema. Database name:
-`CoachOpsDB`. Current version: **6**.
+`CoachOpsDB_v7` (the name changed at v7; see §4.1). Current version: **7**.
 
 | Version | Adds |
 | --- | --- |
@@ -94,6 +94,7 @@ AuthProvider          → who is signed in
 | 4 | evaluations |
 | 5 | `owner_id` index on every table |
 | 6 | `clubs`, `coach_profiles`, `teams.club_id` |
+| 7 | UUID string primary keys (replaced auto-increment ints) |
 
 Dexie does **not** validate row shapes. TypeScript types are the only guard, and
 `position` in particular is a free-form `string` on purpose (the database column
@@ -104,6 +105,37 @@ is `text`). New rows must be given an `owner_id` at creation — see §7.
 - `Owned` — `id?`, `owner_id?`, `updated_at?`. Every syncable row extends it.
 - `CoachProfile` — keyed by the auth uid (`id: string`), so it has no
   `owner_id` and is excluded from ownership sweeps.
+
+### 4.1 Two Dexie footguns
+
+**v7 changed the database name.** Dexie cannot change a primary key on an
+existing store — declaring string keys for a store that already had integer keys
+fails at open with `UpgradeError: Not yet support for changing primary key`, and
+no version number can satisfy it. The app therefore opens `CoachOpsDB_v7` and
+`migrateFromLegacyDb()` copies rows out of the old `CoachOpsDB` on first load,
+assigning fresh UUIDs and remapping every foreign key (including the player ids
+nested in lineup `slots`, `substitutes` and `scorers`).
+
+`deleteLegacyDb()` exists but is deliberately not called automatically, so a
+partial migration can never destroy the original.
+
+**`EntityTable` types `id` as optional.** TypeScript will not catch `.add()` or
+`.bulkAdd()` without an `id`, and Dexie will happily store the row — the failure
+surfaces later as rows that never sync. Grep for `.add(`/`.bulkAdd(` when
+reviewing, and pass `newId()`.
+
+### 4.2 Player photos
+
+`players.photo_url` holds a **base64 JPEG data URL**, not a Storage object URL.
+
+The reasoning, since it looks like a mistake otherwise: a bucket upload requires
+connectivity, so a coach adding a photo at training would see nothing until they
+got signal. Inline, the photo is part of the row the sync engine already moves,
+so it appears on the second device with everything else.
+
+Photos must stay small, so `lib/offline/photo.ts` re-encodes on the device:
+centre-cropped square, 256px, JPEG q0.82, stepping down in quality until under
+400KB. Roughly 15-25KB each.
 
 ---
 

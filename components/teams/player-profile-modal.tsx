@@ -10,6 +10,7 @@ import {
   ATTENDANCE_STYLE,
   type PlayerAttendanceHistory,
 } from "@/lib/offline/attendance";
+import PlayerAvatar from "./player-avatar";
 import { formatDate } from "@/lib/offline/finance";
 import { cn } from "@/lib/utils";
 import { useTeam } from "@/components/pyramid-provider";
@@ -263,8 +264,15 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
       <div className="relative max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-5 shadow-xl print:shadow-none print:max-h-none">
         {/* Screen layout */}
         <div className="no-print">
-          <div className="flex items-start justify-between">
-            <div>
+          <div className="flex items-start justify-between gap-3">
+            <PlayerAvatar
+              photo={player.photo_url}
+              name={player.full_name}
+              jerseyNumber={player.jersey_number}
+              className="h-16 w-16 text-sm"
+              ring="ring-1 ring-slate-200"
+            />
+            <div className="min-w-0 flex-1">
               <h3 className="text-xl font-bold">#{player.jersey_number} — {player.full_name}</h3>
               <p className="text-sm text-slate-500">{player.position} · {player.birth_date ? `تاريخ الميلاد: ${player.birth_date}` : "تاريخ الميلاد غير مسجل"}</p>
             </div>
