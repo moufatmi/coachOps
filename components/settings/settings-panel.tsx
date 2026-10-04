@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil } from "lucide-react";
+import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil, CalendarDays } from "lucide-react";
 import { db, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
-import { exportAllData, importAllData, resetAllData, deleteTeamCascade } from "@/lib/offline/data";
+import { exportAllData, importAllData, resetAllData, deleteTeamCascade, findProbablyEmptySessions, deleteSessions, type EmptySessionScan } from "@/lib/offline/data";
 import { useSync } from "@/components/sync-provider";
 import { SyncIndicator } from "@/components/sync-indicator";
 import { summarize } from "@/lib/supabase/sync";
@@ -85,6 +85,27 @@ export default function SettingsPanel() {
 
   const [clubName, setClubName] = useState("");
   const [clubCity, setClubCity] = useState("");
+
+  // Cleanup for sessions the old attendance page created implicitly.
+  const [scan, setScan] = useState<EmptySessionScan | null>(null);
+  const groupName = (teamId?: number | null) =>
+    groups.find((g) => g.id === teamId)?.name ?? "فئة محذوفة";
+
+  async function scanEmpty() {
+    setScan(await findProbablyEmptySessions());
+  }
+
+  async function purgeEmpty() {
+    if (!scan || scan.empty.length === 0) return;
+    const withAttendance = scan.attendanceRows > 0;
+    const warning = withAttendance
+      ? `\n\nسيُحذف أيضاً ${scan.attendanceRows} سجل حضور مرتبط بها.`
+      : "";
+    if (!confirm(`حذف ${scan.empty.length} حصة فارغة؟${warning}`)) return;
+    await deleteSessions(scan.empty.map((s) => s.id!).filter(Boolean));
+    setMsg(`تم حذف ${scan.empty.length} حصة فارغة`);
+    setScan(null);
+  }
 
   async function createClub(e: React.FormEvent) {
     e.preventDefault();
@@ -373,6 +394,59 @@ export default function SettingsPanel() {
           ))}
           {groups.length === 0 && <li className="py-2 text-sm text-slate-400">لا توجد فئات بعد</li>}
         </ul>
+      </section>
+
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+        <h3 className="flex items-center gap-2 font-bold text-amber-900">
+          <CalendarDays size={18} /> حصص فارغة
+        </h3>
+        <p className="mt-1 text-sm text-amber-800">
+          في نسخة سابقة، كان فتح صفحة «تسجيل الحضور» يُنشئ حصة فارغة في الجدول تلقائياً.
+          يمكنك مراجعة هذه الحصص وحذفها.
+        </p>
+
+        {scan == null ? (
+          <button
+            onClick={scanEmpty}
+            className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm text-amber-900 hover:bg-amber-100"
+          >
+            فحص الحصص الفارغة
+          </button>
+        ) : scan.empty.length === 0 ? (
+          <p className="mt-3 text-sm text-emerald-700">لا توجد حصص فارغة. كل شيء على ما يرام ✓</p>
+        ) : (
+          <>
+            <p className="mt-3 text-sm text-amber-900">
+              وُجدت <b>{scan.empty.length}</b> حصة بدون وقت أو مكان أو ملاحظات
+              {scan.attendanceRows > 0 && (
+                <>، و<span className="font-bold">{scan.attendanceRows}</span> سجل حضور مرتبط بها سيُحذف معها.</>
+              )}
+              .
+            </p>
+            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-amber-800">
+              {scan.empty.map((s) => (
+                <li key={s.id} className="flex justify-between border-b border-amber-200 py-1">
+                  <span>{s.date}</span>
+                  <span>{groupName(s.team_id)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={purgeEmpty}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
+              >
+                حذف {scan.empty.length} حصة
+              </button>
+              <button
+                onClick={scanEmpty}
+                className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm text-amber-900 hover:bg-amber-100"
+              >
+                إعادة الفحص
+              </button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="rounded-xl bg-white border p-5">

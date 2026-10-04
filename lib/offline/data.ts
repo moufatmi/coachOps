@@ -93,6 +93,56 @@ export async function importAllData(payload: unknown) {
   });
 }
 
+export interface EmptySessionScan {
+  /** Sessions that carry no real detail: no time, no location, no notes. */
+  empty: TrainingSession[];
+  /** Attendance rows that would be destroyed alongside them. */
+  attendanceRows: number;
+}
+
+/**
+ * Finds sessions that look auto-generated rather than planned: the attendance
+ * page used to insert a bare session for "today" every time it was opened, so
+ * some coaches have blank rows with no time, location or notes.
+ *
+ * Read-only: nothing is deleted, because a genuinely-planned session can also
+ * have those fields empty. `hasAttendance` is reported so a real session with
+ * recorded attendance is easy to exclude before cleaning up.
+ */
+export async function findProbablyEmptySessions(teamId?: number): Promise<EmptySessionScan> {
+  const all = await db.sessions.toArray();
+  const scoped = teamId == null ? all : all.filter((s) => s.team_id === teamId);
+
+  const empty = scoped.filter(
+    (s) =>
+      s.type === "تدريب" &&
+      !s.time?.trim() &&
+      !s.location?.trim() &&
+      !s.notes?.trim(),
+  );
+
+  let attendanceRows = 0;
+  for (const s of empty) {
+    if (s.id == null) continue;
+    attendanceRows += await db.attendance.where("session_id").equals(s.id).count();
+  }
+
+  return { empty, attendanceRows };
+}
+
+/**
+ * Deletes the sessions found by `findProbablyEmptySessions`, together with
+ * their attendance rows. Attendance is removed too: orphaning it would keep
+ * attendance percentages (which count every row) permanently skewed.
+ */
+export async function deleteSessions(sessionIds: number[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  await db.transaction("rw", [db.sessions, db.attendance], async () => {
+    await db.attendance.where("session_id").anyOf(sessionIds).delete();
+    await db.sessions.bulkDelete(sessionIds);
+  });
+}
+
 export async function resetAllData() {
   const tables = ALL_TABLES.map((name) => db[name]);
   await db.transaction("rw", tables, async () => {

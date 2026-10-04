@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { MessageCircle } from "lucide-react";
-import { db, type AttendanceStatus, type TrainingSession } from "@/lib/offline/db";
+import { db, type AttendanceStatus } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -22,43 +22,33 @@ export default function FlashAttendance() {
   const ownerId = useOwnerId();
   const team = teams.find((t) => t.id === selectedTeamId);
   const today = new Date().toISOString().slice(0, 10);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState("");
 
-  // Ensure today's session + default attendance rows exist
-  useEffect(() => {
-    if (!selectedTeamId) return;
-    (async () => {
-      const sessions = await db.sessions.where("team_id").equals(selectedTeamId).toArray();
-      let session: TrainingSession | undefined = sessions.find((s) => s.date === today);
-      if (!session) {
-        const id = (await db.sessions.add({
-          team_id: selectedTeamId,
-          date: today,
-          type: "تدريب",
-          location: "",
-          notes: "",
-          owner_id: ownerId,
-        })) as number;
-        session = { id, team_id: selectedTeamId, date: today, type: "تدريب", location: "", notes: "" };
-      }
-      const players = await db.players.where("team_id").equals(selectedTeamId).toArray();
-      for (const p of players) {
-        if (p.id == null || session.id == null) continue;
-        const existing = await db.attendance
-          .where("session_id")
-          .equals(session.id)
-          .and((a) => a.player_id === p.id)
-          .first();
-        if (!existing) {
-          await db.attendance.add({
-            session_id: session.id,
-            player_id: p.id,
-            status: "حاضر",
-            owner_id: ownerId,
-          });
-        }
-      }
-    })();
-  }, [selectedTeamId, today, ownerId]);
+  // Opening this page must not invent a scheduled session. A session row is
+  // shared with /schedule, so creating one silently made the schedule claim a
+  // session the coach never planned -- and it happened again every day the page
+  // was opened. The coach is asked instead.
+  async function createTodaySession(): Promise<void> {
+    if (!selectedTeamId || creating) return;
+    setCreating(true);
+    setNotice("");
+    try {
+      await db.sessions.add({
+        team_id: selectedTeamId,
+        date: today,
+        type: "تدريب",
+        location: "",
+        notes: "",
+        owner_id: ownerId,
+      });
+    } catch (e) {
+      console.error("Create session failed:", e);
+      setNotice("تعذّر إنشاء الحصة. حاول مرة أخرى.");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   const players = useLiveQuery(
     () => (selectedTeamId ? db.players.where("team_id").equals(selectedTeamId).sortBy("jersey_number") : []),
@@ -71,6 +61,37 @@ export default function FlashAttendance() {
     const sessions = await db.sessions.where("team_id").equals(selectedTeamId).toArray();
     return sessions.find((s) => s.date === today);
   }, [selectedTeamId, today]);
+
+  // Once a session exists, seed one attendance row per player so every card
+  // shows a status instead of appearing blank. This only fills in missing rows;
+  // statuses the coach has already set are never overwritten.
+  useEffect(() => {
+    // Captured as consts: TypeScript cannot narrow optional ids across the
+    // async closure boundary.
+    const sessionId = session?.id;
+    const teamId = selectedTeamId;
+    if (sessionId == null || teamId == null) return;
+    let cancelled = false;
+    (async () => {
+      const squad = await db.players.where("team_id").equals(teamId).toArray();
+      const existing = await db.attendance.where("session_id").equals(sessionId).toArray();
+      if (cancelled) return;
+      const seen = new Set(existing.map((a) => a.player_id));
+      const missing = squad.filter((p) => p.id != null && !seen.has(p.id));
+      if (missing.length === 0) return;
+      await db.attendance.bulkAdd(
+        missing.map((p) => ({
+          session_id: sessionId,
+          player_id: p.id!,
+          status: "حاضر" as const,
+          owner_id: ownerId,
+        })),
+      );
+    })().catch((e) => console.error("Seed attendance failed:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.id, selectedTeamId, ownerId]);
 
   const records = useLiveQuery(
     () => (session?.id ? db.attendance.where("session_id").equals(session.id).toArray() : []),
@@ -128,6 +149,35 @@ export default function FlashAttendance() {
         </button>
       </div>
 
+      {/* No session for today: ask before writing anything to the schedule. */}
+      {!session && players.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
+          <h3 className="font-bold">لا توجد حصة مسجّلة لهذا اليوم</h3>
+          <p className="mt-1 text-sm">
+            لتسجيل الحضور، أنشئ حصة اليوم (ستظهر أيضاً في الجدول). يمكنك تحديد الوقت والمكان
+            لاحقاً من صفحة الجدول.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => void createTodaySession()}
+              disabled={creating}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {creating ? "جارٍ الإنشاء…" : "إنشاء حصة اليوم"}
+            </button>
+            <a
+              href="/schedule"
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm hover:bg-amber-50"
+            >
+              الذهاب إلى الجدول
+            </a>
+          </div>
+          {notice && <p className="mt-2 text-sm text-red-700">{notice}</p>}
+        </div>
+      )}
+
+      {session && players.length > 0 && (
+        <>
       {/* Summary bar */}
       <div className="sticky top-0 z-10 flex flex-wrap gap-2 rounded-xl border bg-white p-3 shadow-sm">
         <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">✅ الحاضرون: {counts.حاضر}</span>
@@ -162,6 +212,8 @@ export default function FlashAttendance() {
           );
         })}
       </div>
+        </>
+      )}
     </div>
   );
 }
