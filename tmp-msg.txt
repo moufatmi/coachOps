@@ -1,25 +1,28 @@
-fix: migrate via a new database, since Dexie cannot retype a primary key
+fix: sync both ways so a second device sees the first device's work
 
-Sync failed on every table with:
+Reported symptom: signing in on a second device showed none of the changes
+made on the first, even though the rows were present in Supabase.
 
-  UpgradeError Not yet support for changing primary key
+Root cause was that sync only ever pushed. On sign-in the app pushed its local
+database and never asked for anything, so a device that had not synced before
+had nothing to send and nothing to fetch. The data existed on the server; the
+client simply never requested it. This was a client-side bug, not a Supabase
+configuration problem, so no schema change is needed.
 
-Dexie is unable to change a primary key on an existing store, so declaring v7
-with string keys could never upgrade an install that already existed on v6.
-The version bump itself was unsatisfiable.
+Changes:
 
-The app now opens a new database, `CoachOpsDB_v7`, and
-migrateFromLegacyDb() copies the old rows across on first load:
+- syncNow() reconciles in both directions: pull first, then push. Pulling
+  before pushing is what lets a fresh device adopt existing rows instead of
+  treating its empty local database as the whole truth.
+- Sign-in now runs syncNow() rather than pushNow().
+- Reconnecting (the `online` event) also runs a full reconcile, since that is
+  the likeliest moment to be holding new work from elsewhere.
+- Focusing the tab or returning to it triggers a reconcile, which is how a
+  second device is normally opened.
+- A 2-minute background poll pulls only (local edits are already pushed by the
+  mutation watcher, so pushing again would just double the traffic).
+- The header indicator and a new "sync now" button in Settings call syncNow().
 
-- opens the previous `CoachOpsDB`, reads every table, closes it
-- assigns a fresh UUID per row and remaps every foreign key, including the
-  player ids nested inside lineup slots, substitutes and scorers
-- writes the results into the new database in one transaction
-- records a flag in localStorage so it never runs twice
-
-deleteLegacyDb() is exported to drop the old database once the copy is
-verified; it is intentionally not called automatically, so a failed or partial
-migration can never destroy the original data.
-
-Behaviour for the common case is unchanged: a brand new install has no legacy
-database, finds nothing to copy, and starts empty.
+Also hardened push: rows owned by a different account are now skipped. On a
+device shared between coaches, sending another account's rows violated RLS and
+failed the entire table, taking this coach's own rows down with it.

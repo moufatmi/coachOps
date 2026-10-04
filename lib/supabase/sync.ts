@@ -92,6 +92,15 @@ export async function pushToCloud(): Promise<SyncReport> {
       report.errors.push(`${table}: فشل قراءة البيانات المحلية (${describe(e)})`);
       continue;
     }
+    // On a device shared between accounts, skip rows owned by someone else.
+    // Sending them would violate RLS and fail the whole table, taking this
+    // coach's own rows down with it. `coach_profiles` has no owner_id column --
+    // its id *is* the coach's auth id -- so it is filtered by comparing that.
+    rows =
+      table === "coach_profiles"
+        ? rows.filter((r) => String(r.id) === session.uid)
+        : rows.filter((r) => r.owner_id == null || r.owner_id === session.uid);
+
     if (rows.length === 0) continue;
 
     const now = new Date().toISOString();

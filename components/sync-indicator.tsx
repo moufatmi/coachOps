@@ -24,7 +24,7 @@ function timeAgo(ts: number): string {
 }
 
 export function SyncIndicator({ className }: { className?: string }) {
-  const { state, lastSyncedAt, error, busy, pushNow } = useSync();
+  const { state, lastSyncedAt, error, busy, syncNow } = useSync();
   const copy = COPY[state];
   const Icon =
     state === "syncing" || busy ? RefreshCw
@@ -42,7 +42,7 @@ export function SyncIndicator({ className }: { className?: string }) {
 
   return (
     <button
-      onClick={() => void pushNow()}
+      onClick={() => void syncNow()}
       disabled={busy}
       title={title}
       aria-label={title}

@@ -73,7 +73,7 @@ export default function SettingsPanel() {
   const { groups } = usePyramid();
   const { user, deleteAccount } = useAuth();
   const { profile, clubs, selectedClubId, selectClub } = usePyramid();
-  const { pushNow, pullNow, busy, state, error, lastSyncedAt } = useSync();
+  const { pushNow, pullNow, syncNow, busy, state, error, lastSyncedAt } = useSync();
   const [category, setCategory] = useState<TeamCategory>("U15");
   const [season, setSeason] = useState("2026/2027");
   const [fee, setFee] = useState("");
@@ -250,6 +250,13 @@ export default function SettingsPanel() {
   async function doPush() {
     const report = await pushNow();
     setMsg(report ? summarize(report) : "تعذّر إتمام الرفع (طلب متزامن أو الشبكة غير متاحة).");
+  }
+
+  /** Full two-way reconciliation — the action to use on a second device. */
+  async function doSync() {
+    setMsg("جارٍ المزامنة مع السحابة…");
+    await syncNow();
+    setMsg("تمت المزامنة مع السحابة ☁️ (جلب ثم رفع)");
   }
 
   async function doPull() {
@@ -559,7 +566,10 @@ export default function SettingsPanel() {
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button onClick={doPush} disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50">
+          <button onClick={doSync} disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50">
+            مزامنة الآن
+          </button>
+          <button onClick={doPush} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
             {busy && state === "syncing" ? "جارٍ الرفع…" : "رفع إلى السحابة"}
           </button>
           <button onClick={doPull} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">

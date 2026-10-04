@@ -33,6 +33,8 @@ export type SyncState =
   | "error";      // last attempt failed; `error` explains why
 
 const DEBOUNCE_MS = 10_000;
+/** Background reconciliation interval while the app stays open. */
+const POLL_MS = 120_000;
 const LAST_SYNC_KEY = "coachops:lastSyncedAt";
 
 interface SyncContextValue {
@@ -44,6 +46,11 @@ interface SyncContextValue {
   /** Resolves with the sync report, or null if the request was skipped. */
   pushNow: () => Promise<SyncReport | null>;
   pullNow: () => Promise<SyncReport | null>;
+  /**
+   * Full reconciliation: pull first, then push. This is what makes a second
+   * device see the first device's work.
+   */
+  syncNow: () => Promise<void>;
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);
@@ -134,6 +141,20 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     return report;
   }, []);
 
+  /**
+   * Pull then push.
+   *
+   * Order matters: pulling first means a second device picks up the first
+   * device's rows before it sends its own, so a fresh device that has never
+   * synced learns what already exists instead of treating its empty local
+   * database as the whole truth.
+   */
+  const syncNow = useCallback(async (): Promise<void> => {
+    if (!userId) return;
+    await pullNow();
+    await pushNow();
+  }, [userId, pullNow, pushNow]);
+
   const schedule = useCallback(() => {
     if (!userId || inFlight.current) return;
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -168,7 +189,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (!userId) return;
     const goOnline = () => {
       setState((prev) => (prev === "offline" ? "pending" : prev));
-      schedule();
+      // Reconnecting is the most likely moment to be holding new work from the
+      // other device, so reconcile in both directions.
+      void syncNow();
     };
     const goOffline = () => {
       if (timer.current) clearTimeout(timer.current);
@@ -180,7 +203,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
     };
-  }, [userId, schedule]);
+  }, [userId, schedule, syncNow]);
 
   // Read the persisted timestamp after mount (deferred, to keep the first client
   // render identical to the server's and avoid a hydration mismatch).
@@ -189,17 +212,42 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(t);
   }, []);
 
-  // A fresh sign-in should land on the server, not wait for a local edit.
-  // Deferred by a tick so the push is not kicked off during render commit.
+  // A fresh sign-in must reconcile in both directions. Pushing alone left a
+  // second device permanently empty, because it had nothing to send and never
+  // asked for anything.
   useEffect(() => {
     if (!ready || !userId) return;
-    const t = setTimeout(() => void pushNow(), 0);
+    const t = setTimeout(() => void syncNow(), 0);
     return () => clearTimeout(t);
-  }, [ready, userId, pushNow]);
+  }, [ready, userId, syncNow]);
+
+  // Catch up when the coach comes back to the tab, which is the usual way a
+  // second device is opened in practice.
+  useEffect(() => {
+    if (!userId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void syncNow();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [userId, syncNow]);
+
+  // Slow background poll as a backstop, so a device left open picks up the other
+  // device's work without any interaction. Pull only: local edits are already
+  // pushed by the mutation watcher, so pushing again would just double traffic.
+  useEffect(() => {
+    if (!userId) return;
+    const id = setInterval(() => void pullNow(), POLL_MS);
+    return () => clearInterval(id);
+  }, [userId, pullNow]);
 
   const value = useMemo<SyncContextValue>(
-    () => ({ state, lastSyncedAt, error, busy, pushNow, pullNow }),
-    [state, lastSyncedAt, error, busy, pushNow, pullNow],
+    () => ({ state, lastSyncedAt, error, busy, pushNow, pullNow, syncNow }),
+    [state, lastSyncedAt, error, busy, pushNow, pullNow, syncNow],
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
