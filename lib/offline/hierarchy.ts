@@ -97,6 +97,18 @@ export function unattachedGroups(groups: Team[], clubs: Club[]): Team[] {
   return groups.filter((g) => g.club_id == null || !known.has(g.club_id));
 }
 
+/**
+ * Builds an age group's display name from its category and season, e.g.
+ * "U15 · 2026/2027". Derived rather than typed, so a group cannot end up with a
+ * name that contradicts its own category, and renaming stays consistent.
+ */
+export function suggestGroupName(category: string, season?: string): string {
+  const cat = category.trim();
+  const sea = season?.trim();
+  if (cat && sea) return `${cat} · ${sea}`;
+  return cat || sea || "فئة";
+}
+
 export async function addClub(
   ownerId: string,
   name: string,

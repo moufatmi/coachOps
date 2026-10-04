@@ -11,7 +11,7 @@ import { summarize } from "@/lib/supabase/sync";
 import { useAuth } from "@/components/auth-provider";
 import { seedDatabase } from "@/lib/offline/seed";
 import { usePyramid } from "@/components/pyramid-provider";
-import { addClub, saveCoachProfile, deleteClub } from "@/lib/offline/hierarchy";
+import { addClub, saveCoachProfile, deleteClub, suggestGroupName } from "@/lib/offline/hierarchy";
 
 /**
  * Suggested age bands: the built-in defaults plus every category already used
@@ -73,7 +73,6 @@ export default function SettingsPanel() {
   const { user } = useAuth();
   const { profile, clubs, selectedClubId, selectClub } = usePyramid();
   const { pushNow, pullNow, busy, state, error, lastSyncedAt } = useSync();
-  const [name, setName] = useState("");
   const [category, setCategory] = useState<TeamCategory>("U15");
   const [season, setSeason] = useState("2026/2027");
   const [msg, setMsg] = useState("");
@@ -99,19 +98,21 @@ export default function SettingsPanel() {
 
   async function addTeam(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !category.trim()) return;
+    if (!category.trim()) return;
     // An age group always belongs to a club; fall back to the coach's first one.
     const clubId =
       selectedClubId ?? clubs[0]?.id ?? (await addClub(user!.id, "ناديي"));
     await db.teams.add({
-      name: name.trim(),
+      // The name is derived from category + season, so it can never drift out of
+      // sync with the age band the coach picked.
+      name: suggestGroupName(category, season),
       category: category.trim(),
       season,
       club_id: clubId,
       created_at: new Date().toISOString(),
       owner_id: user?.id,
     });
-    setName("");
+    setCategory("U15");
     setMsg("تمت إضافة الفئة");
   }
 
@@ -294,15 +295,6 @@ export default function SettingsPanel() {
               ))}
             </select>
           </label>
-          <label className="flex-1 basis-40 text-xs text-slate-500">
-            اسم الفئة
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="مثال: فئة U15"
-              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-            />
-          </label>
           <label className="text-xs text-slate-500">
             الفئة العمرية
             <input
@@ -328,6 +320,14 @@ export default function SettingsPanel() {
               className="mt-1 w-28 rounded-lg border px-3 py-2 text-sm"
             />
           </label>
+          {/* Preview of the name that will be generated, so the derivation is
+              visible before saving rather than surprising afterwards. */}
+          <div className="basis-full text-xs text-slate-400">
+            سيُنشأ باسم:{" "}
+            <span className="font-medium text-slate-600">
+              {suggestGroupName(category, season)}
+            </span>
+          </div>
           <button className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700">
             <Plus size={16} /> إضافة
           </button>
