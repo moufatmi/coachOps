@@ -43,7 +43,20 @@ create temporary table _m_eval     as select id::bigint as old_id, gen_random_uu
 -- ---------------------------------------------------------------------------
 -- 3. Widen every id column to text. bigint -> text is always safe, and text is
 --    the only type that can hold both an old integer and a new uuid string.
+--    The identity must be dropped first: Postgres refuses to change the type of
+--    an identity column and errors with
+--      22023: identity column type must be smallint, integer, or bigint
 -- ---------------------------------------------------------------------------
+alter table clubs       alter column id drop identity;
+alter table teams       alter column id drop identity;
+alter table players     alter column id drop identity;
+alter table sessions    alter column id drop identity;
+alter table attendance  alter column id drop identity;
+alter table lineups     alter column id drop identity;
+alter table cotisations alter column id drop identity;
+alter table expenses    alter column id drop identity;
+alter table evaluations alter column id drop identity;
+
 alter table clubs       alter column id type text;
 alter table teams       alter column id type text;
 alter table teams       alter column club_id type text;
@@ -157,6 +170,17 @@ alter table expenses    alter column team_id type uuid using team_id::uuid;
 alter table evaluations alter column id type uuid using id::uuid;
 alter table evaluations alter column team_id type uuid using team_id::uuid;
 alter table evaluations alter column player_id type uuid using player_id::uuid;
+
+-- Server-side inserts (e.g. from the Supabase dashboard) still need a default.
+alter table clubs       alter column id set default gen_random_uuid();
+alter table teams       alter column id set default gen_random_uuid();
+alter table players     alter column id set default gen_random_uuid();
+alter table sessions    alter column id set default gen_random_uuid();
+alter table attendance  alter column id set default gen_random_uuid();
+alter table lineups     alter column id set default gen_random_uuid();
+alter table cotisations alter column id set default gen_random_uuid();
+alter table expenses    alter column id set default gen_random_uuid();
+alter table evaluations alter column id set default gen_random_uuid();
 
 -- ---------------------------------------------------------------------------
 -- 7. Restore the constraints.
