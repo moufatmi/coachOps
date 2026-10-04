@@ -56,16 +56,19 @@ function stamp(row: SyncRow): number {
 /**
  * Resolves the signed-in coach, or explains why sync is unavailable.
  *
- * Push/pull are meaningless without a session: RLS would reject every row, and
- * an unauthenticated push would appear to succeed while writing nothing.
+ * Uses `getSession()` rather than `getUser()`. `getUser()` makes a network round
+ * trip to /auth/v1/user on every sync and logs a 403 in the console whenever
+ * there is no session, which flooded DevTools with noise that looked like a real
+ * failure. `getSession()` reads the already-held session, which is what the RLS
+ * policies evaluate against anyway; a genuinely expired token still fails the
+ * request below with a real error.
  */
 async function currentUserId(supabase: SupabaseClient | null): Promise<SessionCheck> {
   if (!supabase) return { ok: false, error: SUPABASE_UNCONFIGURED_MESSAGE };
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data?.user) {
-    return { ok: false, error: "يجب تسجيل الدخول قبل المزامنة" };
-  }
-  return { ok: true, uid: data.user.id };
+  const { data } = await supabase.auth.getSession();
+  const user = data.session?.user;
+  if (!user) return { ok: false, error: "يجب تسجيل الدخول قبل المزامنة" };
+  return { ok: true, uid: user.id };
 }
 
 export async function pushToCloud(): Promise<SyncReport> {

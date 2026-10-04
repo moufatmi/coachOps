@@ -149,6 +149,23 @@ export default function FlashAttendance() {
         </button>
       </div>
 
+      {/* No squad yet: explain before offering to create a session, so an empty
+          roster is not mistaken for a broken page. */}
+      {players.length === 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 text-center">
+          <h3 className="font-bold">لا يوجد لاعبون في هذه الفئة بعد</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            أضف اللاعبين من صفحة «الفرق واللاعبين» لتسجيل الحضور.
+          </p>
+          <a
+            href="/teams"
+            className="mt-3 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+          >
+            الذهاب إلى اللاعبين
+          </a>
+        </div>
+      )}
+
       {/* No session for today: ask before writing anything to the schedule. */}
       {!session && players.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
