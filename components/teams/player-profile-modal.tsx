@@ -346,6 +346,12 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
 
         {/* Printable sheet */}
         <div className="hidden print:block text-black">
+          {player.photo_url && (
+            <div className="flex justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={player.photo_url} alt={player.full_name} className="h-28 w-28 rounded-full object-cover" />
+            </div>
+          )}
           <h1 className="text-center text-2xl font-bold">بطاقة اللاعب — {team?.name}</h1>
           <p className="text-center">{player.full_name} · #{player.jersey_number} · {player.position} · {player.status}</p>
           <p className="text-center text-sm">ولي الأمر: {player.parent_phone} · تاريخ الميلاد: {player.birth_date ?? "—"}</p>

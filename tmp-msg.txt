@@ -1,24 +1,15 @@
-feat: player photos
+fix: printing a player card no longer prints the whole squad
 
-Coaches recognise players by face, not by shirt number. Photos now appear on the
-squad card, the player profile, the pitch, the bench and the attendance tiles.
+Printing a player's profile produced that player's card followed by every other
+player card on the page.
 
-Stored inline on players.photo_url as a base64 JPEG data URL rather than a
-Supabase Storage object URL, because this app is offline-first: a bucket upload
-needs connectivity, so a photo added at training would show nothing until the
-coach got signal. Inline, it rides along with the row sync already in place, so
-the picture is on the second device with everything else.
+The profile modal deliberately becomes `print:static` so its printable sheet
+lands in the output, but the squad grid it sits on top of had no print rule of
+its own. Only `aside`, `header` and `nav` are hidden by the global print styles,
+so the directory rendered underneath stayed visible.
 
-Sizes are kept down on the device (lib/offline/photo.ts): centre-cropped square
-because every consumer is a circle, 256px, JPEG q0.82, stepping quality down
-until under 400KB. A squad of 25 is a few hundred KB. Decoding prefers
-createImageBitmap so a 12MP camera photo does not block the main thread, falling
-back to an <img> for WebViews that lack it.
+Wrapped the directory (header, search box and card grid) in `no-print`. The modal
+is rendered outside that wrapper, so the printable sheet is untouched.
 
-Every avatar falls back to the shirt number. At 48px on a pitch, circles sit
-adjacent to each other and a face is easier to track than initials; the number is
-still what a coach calls out, so it stays in the label under the marker.
-
-Also fixes the edit path, which previously wrote photo_url only on insert --
-editing a player could never attach a photo, so "add a picture" would have
-looked broken.
+Also added the player's photo to the printed card, since photos now exist and a
+printed card without the face is a smaller win than it could be.

@@ -166,6 +166,13 @@ export default function PlayerDirectory() {
 
   return (
     <div className="space-y-4">
+      {/*
+        The whole squad list is screen-only. The profile modal is the printable
+        artefact and it switches itself to `print:static`, but without this the
+        grid underneath stayed in the print output, so printing one player card
+        produced that card followed by every squad card on the page.
+      */}
+      <div className="space-y-4 no-print">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold">الفرق واللاعبين</h2>
@@ -224,6 +231,7 @@ export default function PlayerDirectory() {
             </div>
           </div>
         ))}
+      </div>
       </div>
 
       {/* Add/Edit modal */}
