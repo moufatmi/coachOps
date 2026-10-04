@@ -202,7 +202,16 @@ export interface Attendance extends Owned {
   notes?: string;
 }
 
-const db = new Dexie("CoachOpsDB") as Dexie & {
+// The database name changed at v7 because Dexie cannot alter a primary key on
+// an existing store ("Not yet support for changing primary key"). The previous
+// database is left untouched; migrateFromLegacyDb() copies it across on first
+// load and then removes it, so nothing is silently abandoned.
+const DB_NAME = "CoachOpsDB_v7";
+
+/** The pre-v7 database, read once to migrate data out of it. */
+export const LEGACY_DB_NAME = "CoachOpsDB";
+
+const db = new Dexie(DB_NAME) as Dexie & {
   teams: EntityTable<Team, "id">;
   clubs: EntityTable<Club, "id">;
   coach_profiles: EntityTable<CoachProfile, "id">;

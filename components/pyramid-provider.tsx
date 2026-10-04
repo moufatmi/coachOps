@@ -5,7 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Club, type CoachProfile, type Team } from "@/lib/offline/db";
 import { ownedBy } from "@/lib/offline/ownership";
 import { loadHierarchy, ensureCoachProfile } from "@/lib/offline/hierarchy";
-import { migrateIdsToUuids } from "@/lib/offline/migrate";
+import { migrateFromLegacyDb } from "@/lib/offline/migrate";
 import { useAuth } from "@/components/auth-provider";
 
 /**
@@ -79,21 +79,21 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
     [] as Team[],
   );
 
-  // Runs once, before any page reads a query result, so integer keys from older
-  // installs are rewritten to UUIDs with their foreign keys remapped.
+  // Copies any pre-v7 data into the new UUID-keyed database. Blocks until done
+  // so no page can read a half-migrated database.
   const [schemaReady, setSchemaReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    migrateIdsToUuids()
+    migrateFromLegacyDb()
       .then((r) => {
         if (r.migrated && r.brokenRefs > 0) {
           console.warn(
-            `CoachOps: ${r.brokenRefs} reference(s) could not be matched during the id migration.`,
+            `CoachOps: ${r.brokenRefs} reference(s) could not be matched while copying old data.`,
           );
         }
       })
-      .catch((e) => console.error("Id migration failed:", e))
+      .catch((e) => console.error("Data migration failed:", e))
       .finally(() => {
         if (!cancelled) setSchemaReady(true);
       });
