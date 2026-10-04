@@ -6,6 +6,7 @@ import { Edit2, Plus, Trash2, MessageCircle } from "lucide-react";
 import { db, type Player, type PlayerPosition, type PlayerStatus } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
+import { attendanceCountsFor } from "@/lib/offline/attendance";
 import PlayerProfileModal from "./player-profile-modal";
 
 const POSITIONS: PlayerPosition[] = [
@@ -55,18 +56,12 @@ export default function PlayerDirectory() {
   const [formError, setFormError] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
 
+  // Shared with the profile modal so the card and the detail view can never
+  // disagree about a player's attendance rate.
   const attendanceRates = useLiveQuery(
     async () => {
-      const rates: Record<number, { present: number; total: number }> = {};
-      const rows = await db.attendance.toArray();
-      const playerIds = new Set(players.map((p) => p.id));
-      for (const a of rows) {
-        if (!playerIds.has(a.player_id)) continue;
-        const r = (rates[a.player_id] ??= { present: 0, total: 0 });
-        r.total += 1;
-        if (a.status === "حاضر" || a.status === "متأخر") r.present += 1;
-      }
-      return rates;
+      const ids = players.map((p) => p.id).filter((id): id is number => id != null);
+      return attendanceCountsFor(ids);
     },
     [selectedTeamId, players],
     {} as Record<number, { present: number; total: number }>,

@@ -4,6 +4,14 @@ import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { MessageCircle, Printer, X } from "lucide-react";
 import { db, type Evaluation, type Player } from "@/lib/offline/db";
+import {
+  getPlayerAttendanceHistory,
+  ATTENDANCE_DOT,
+  ATTENDANCE_STYLE,
+  type PlayerAttendanceHistory,
+} from "@/lib/offline/attendance";
+import { formatDate } from "@/lib/offline/finance";
+import { cn } from "@/lib/utils";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 
@@ -37,6 +45,148 @@ function Bar({ label, value }: { label: string; value: number }) {
   );
 }
 
+/**
+ * Per-session attendance record. Answering "did he come last time, and how
+ * often does he come?" needs the dated list, which the summary tiles above
+ * cannot convey.
+ */
+function AttendanceHistory({
+  history,
+}: {
+  history: PlayerAttendanceHistory | null;
+}) {
+  const [showAll, setShowAll] = useState(false);
+
+  if (!history) {
+    return (
+      <div className="mt-5">
+        <h4 className="font-bold">سجل الحضور</h4>
+        <p className="mt-2 text-sm text-slate-400">جارٍ التحميل…</p>
+      </div>
+    );
+  }
+
+  const { stats, entries } = history;
+
+  if (entries.length === 0) {
+    return (
+      <div className="mt-5">
+        <h4 className="font-bold">سجل الحضور</h4>
+        <p className="mt-2 text-sm text-slate-400">
+          لا توجد حصص مسجّلة لهذا اللاعب بعد.
+        </p>
+      </div>
+    );
+  }
+
+  const shown = showAll ? entries : entries.slice(0, 8);
+
+  return (
+    <div className="mt-5">
+      <h4 className="font-bold">سجل الحضور</h4>
+
+      {/* At-a-glance */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "rounded-full px-2.5 py-1 text-xs font-semibold",
+            stats.rate >= 75
+              ? "bg-emerald-100 text-emerald-800"
+              : stats.rate >= 50
+                ? "bg-amber-100 text-amber-800"
+                : "bg-red-100 text-red-800",
+          )}
+        >
+          النسبة: {stats.rate}% ({stats.present + stats.late}/{stats.total})
+        </span>
+        {stats.currentStreak > 0 && (
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
+            🔥 {stats.currentStreak} حصة متتالية
+          </span>
+        )}
+        {stats.longestStreak > stats.currentStreak && (
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">
+            أطول سلسلة: {stats.longestStreak}
+          </span>
+        )}
+        {stats.excused > 0 && (
+          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-700">
+            بعذر: {stats.excused}
+          </span>
+        )}
+      </div>
+
+      {/* Last attended / last missed, the two questions a coach asks most */}
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {stats.lastAttended && (
+          <p className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+            آخر حضور: <b>{formatDate(stats.lastAttended.date)}</b> ·{" "}
+            {stats.lastAttended.type}
+          </p>
+        )}
+        {stats.lastMissed && (
+          <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-900">
+            آخر غياب: <b>{formatDate(stats.lastMissed.date)}</b> ·{" "}
+            {stats.lastMissed.type}
+          </p>
+        )}
+      </div>
+
+      {/* Recent form dots */}
+      {stats.recentForm.length > 0 && (
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-xs text-slate-500">آخر {stats.recentForm.length} حصص:</span>
+          <span className="flex gap-1">
+            {stats.recentForm.map((s, i) => (
+              <span
+                key={i}
+                title={s}
+                className={cn("h-3 w-3 rounded-full", ATTENDANCE_DOT[s])}
+              />
+            ))}
+          </span>
+          <span className="text-xs text-slate-400">← الأحدث أولاً</span>
+        </div>
+      )}
+
+      {/* Dated list */}
+      <ul className="mt-3 divide-y rounded-lg border">
+        {shown.map((e) => (
+          <li key={e.sessionId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", ATTENDANCE_DOT[e.status])} />
+              <span className="tabular-nums">{formatDate(e.date)}</span>
+              <span className="truncate text-xs text-slate-500">{e.type}</span>
+              {e.location && (
+                <span className="hidden truncate text-xs text-slate-400 sm:inline">
+                  · {e.location}
+                </span>
+              )}
+            </span>
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold",
+                ATTENDANCE_STYLE[e.status],
+              )}
+            >
+              {e.status}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {entries.length > 8 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-2 text-xs text-slate-500 hover:underline"
+        >
+          {showAll ? "إظهار آخر 8 حصص فقط" : `عرض كل الحصص (${entries.length})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function PlayerProfileModal({ player, onClose }: Props) {
   const { teams, selectedTeamId } = useTeam();
   const ownerId = useOwnerId();
@@ -51,10 +201,12 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
     [] as Evaluation[],
   );
 
-  const attendance = useLiveQuery(
-    async () => (player?.id ? db.attendance.where("player_id").equals(player.id).toArray() : []),
+  // Resolved against sessions so each row carries its date -- the coach needs
+  // to know *when*, not just how many.
+  const history = useLiveQuery(
+    () => (player?.id ? getPlayerAttendanceHistory(player.id) : null),
     [player?.id],
-    [],
+    null,
   );
 
   const cotisations = useLiveQuery(
@@ -64,11 +216,10 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
   );
 
   const attendanceStats = useMemo(() => {
-    const present = attendance.filter((a) => a.status === "حاضر").length;
-    const late = attendance.filter((a) => a.status === "متأخر").length;
-    const absent = attendance.filter((a) => a.status === "غائب").length;
-    return { present, late, absent, total: attendance.length };
-  }, [attendance]);
+    if (!history) return { present: 0, late: 0, absent: 0, total: 0 };
+    const s = history.stats;
+    return { present: s.present, late: s.late, absent: s.absent, total: s.total };
+  }, [history]);
 
   const paymentStats = useMemo(() => {
     const paid = cotisations.reduce((s, c) => s + c.paid_amount, 0);
@@ -136,6 +287,9 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
             <div className="rounded-lg border p-2 text-center"><p className="text-lg font-bold text-red-700">{paymentStats.debt}</p><p className="text-xs text-slate-500">متأخرات</p></div>
           </div>
 
+          {/* Attendance record, session by session */}
+          <AttendanceHistory history={history} />
+
           <h4 className="mt-5 font-bold">التقييم التقني</h4>
           <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Bar label="التقنيات (التحكم، التمرير، المراوغة، التسديد)" value={latest?.technique ?? 0} />
@@ -188,6 +342,37 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
           <p className="text-center text-sm">ولي الأمر: {player.parent_phone} · تاريخ الميلاد: {player.birth_date ?? "—"}</p>
           <h2 className="mt-4 font-bold">ملخص الحضور والأداء المالي</h2>
           <p className="text-sm">الحضور: {attendanceStats.present} · التأخيرات: {attendanceStats.late} · الغيابات: {attendanceStats.absent} · المؤدى: {paymentStats.paid} درهم · المتأخرات: {paymentStats.debt} درهم</p>
+          {history && history.entries.length > 0 && (
+            <>
+              <p className="mt-2 text-sm">
+                نسبة الحضور: {history.stats.rate}% ({history.stats.present + history.stats.late}/
+                {history.stats.total})
+                {history.stats.currentStreak > 0 && ` · سلسلة حالية: ${history.stats.currentStreak}`}
+              </p>
+              <h3 className="mt-4 font-bold">سجل الحضور التفصيلي</h3>
+              <table className="w-full border-collapse border text-sm">
+                <thead>
+                  <tr>
+                    <th className="border p-1 text-right">التاريخ</th>
+                    <th className="border p-1 text-right">النوع</th>
+                    <th className="border p-1 text-right">الحالة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.entries.slice(0, 20).map((e) => (
+                    <tr key={e.sessionId}>
+                      <td className="border p-1">{formatDate(e.date)}</td>
+                      <td className="border p-1">{e.type}</td>
+                      <td className="border p-1">{e.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {history.entries.length > 20 && (
+                <p className="mt-1 text-xs">تُعرض أول 20 حصة من {history.entries.length}.</p>
+              )}
+            </>
+          )}
           <h2 className="mt-4 font-bold">آخر تقييم ({latest?.date ?? "—"})</h2>
           <table className="w-full border-collapse border text-sm">
             <tbody>
