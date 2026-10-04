@@ -1,28 +1,29 @@
-fix: sync both ways so a second device sees the first device's work
+refactor: one attendance screen instead of two
 
-Reported symptom: signing in on a second device showed none of the changes
-made on the first, even though the rows were present in Supabase.
+Attendance was reachable from two places with the same purpose and different
+capabilities, which made the app feel broken rather than feature-rich:
 
-Root cause was that sync only ever pushed. On sign-in the app pushed its local
-database and never asked for anything, so a device that had not synced before
-had nothing to send and nothing to fetch. The data existed on the server; the
-client simply never requested it. This was a client-side bug, not a Supabase
-configuration problem, so no schema change is needed.
+- the schedule's session modal could mark statuses for any date, but had no
+  WhatsApp report and a cramped list layout
+- /attendance had the big tap cards and the WhatsApp report, but was hardcoded
+  to today, so a forgotten session could never be filled in afterwards
 
-Changes:
+Neither was a superset, so a coach had to learn which one to reach for. The
+standalone page is the better interface for the common case -- marking a squad
+at the door, one-handed, players queueing -- so it survives and gains the
+missing capability instead.
 
-- syncNow() reconciles in both directions: pull first, then push. Pulling
-  before pushing is what lets a fresh device adopt existing rows instead of
-  treating its empty local database as the whole truth.
-- Sign-in now runs syncNow() rather than pushNow().
-- Reconnecting (the `online` event) also runs a full reconcile, since that is
-  the likeliest moment to be holding new work from elsewhere.
-- Focusing the tab or returning to it triggers a reconcile, which is how a
-  second device is normally opened.
-- A 2-minute background poll pulls only (local edits are already pushed by the
-  mutation watcher, so pushing again would just double the traffic).
-- The header indicator and a new "sync now" button in Settings call syncNow().
+- /attendance now has a session picker defaulting to today, covering any date
+- the schedule links to /attendance?session=<id> for that session
+- the schedule keeps a read-only "✓ present/squad" badge per row, so it can
+  still answer "who turned up?" without becoming a second editor
+- the WhatsApp report now dates itself from the selected session rather than
+  from today, which was wrong as soon as a past session could be opened
+- components/schedule/session-detail.tsx deleted
 
-Also hardened push: rows owned by a different account are now skipped. On a
-device shared between coaches, sending another account's rows violated RLS and
-failed the entire table, taking this coach's own rows down with it.
+Data is unaffected: both screens always wrote to the same attendance rows, so
+this only removes an interface.
+
+The URL param is read with useSearchParams inside a Suspense boundary rather
+than in an effect, so opening a past session does not flash today's screen
+first.

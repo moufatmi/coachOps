@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { MessageCircle } from "lucide-react";
-import { db, type AttendanceStatus , newId } from "@/lib/offline/db";
+import { useSearchParams } from "next/navigation";
+import { MessageCircle, CalendarDays } from "lucide-react";
+import { db, type AttendanceStatus, type TrainingSession , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -17,13 +18,72 @@ const STATUS_STYLES: Record<AttendanceStatus, { card: string; label: string }> =
   معذور: { card: "bg-blue-100 border-blue-400 text-blue-800", label: "معذور" },
 };
 
+/**
+ * The single attendance screen.
+ *
+ * This used to be one of two: the schedule's session modal could also set
+ * statuses, which meant two places to do the same job with different
+ * capabilities (only this one had the WhatsApp report) and different limits
+ * (only the modal could open a past session). Marking attendance at the door
+ * wants the big tap targets here; fixing a forgotten session wants to choose the
+ * date. So the session picker below serves both, and the schedule now links here
+ * instead of opening its own editor.
+ */
+/**
+ * `useSearchParams` forces the client component to be dynamic, which Next
+ * requires to sit behind a Suspense boundary. The fallback matches the shape of
+ * the real screen so the layout does not jump once the query resolves.
+ */
 export default function FlashAttendance() {
+  return (
+    <Suspense fallback={<div className="h-10" />}>
+      <AttendanceScreen />
+    </Suspense>
+  );
+}
+
+function AttendanceScreen() {
+  const searchParams = useSearchParams();
   const { teams, selectedTeamId } = useTeam();
   const ownerId = useOwnerId();
   const team = teams.find((t) => t.id === selectedTeamId);
   const today = new Date().toISOString().slice(0, 10);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
+  /**
+   * The session being marked. `null` means "follow today", which is what a coach
+   * opening the page at training time wants. The schedule links here with
+   * `?session=<id>` to open one specific session, often a past one.
+   *
+   * Seeded from the URL rather than read in an effect: Suspense above guarantees
+   * the param is available on the first render, so there is no flash of "today"
+   * before switching to the session that was actually asked for.
+   */
+  const [pickedSessionId, setPickedSessionId] = useState<string | null>(
+    searchParams.get("session"),
+  );
+
+  const players = useLiveQuery(
+    () => (selectedTeamId ? db.players.where("team_id").equals(selectedTeamId).sortBy("jersey_number") : []),
+    [selectedTeamId],
+    [],
+  );
+
+  const sessions = useLiveQuery(
+    async () => {
+      if (!selectedTeamId) return [] as TrainingSession[];
+      const rows = await db.sessions.where("team_id").equals(selectedTeamId).toArray();
+      return rows.sort((a, b) => b.date.localeCompare(a.date));
+    },
+    [selectedTeamId],
+    [] as TrainingSession[],
+  );
+
+  const todaySession = useMemo(() => sessions.find((s) => s.date === today), [sessions, today]);
+  const picked = pickedSessionId ? sessions.find((s) => s.id === pickedSessionId) : undefined;
+  // A picked session that has since been deleted falls back to today rather than
+  // leaving the page blank.
+  const session = picked ?? todaySession;
 
   // Opening this page must not invent a scheduled session. A session row is
   // shared with /schedule, so creating one silently made the schedule claim a
@@ -50,18 +110,6 @@ export default function FlashAttendance() {
       setCreating(false);
     }
   }
-
-  const players = useLiveQuery(
-    () => (selectedTeamId ? db.players.where("team_id").equals(selectedTeamId).sortBy("jersey_number") : []),
-    [selectedTeamId],
-    [],
-  );
-
-  const session = useLiveQuery(async () => {
-    if (!selectedTeamId) return undefined;
-    const sessions = await db.sessions.where("team_id").equals(selectedTeamId).toArray();
-    return sessions.find((s) => s.date === today);
-  }, [selectedTeamId, today]);
 
   // Once a session exists, seed one attendance row per player so every card
   // shows a status instead of appearing blank. This only fills in missing rows;
@@ -116,7 +164,10 @@ export default function FlashAttendance() {
   }
 
   function shareWhatsApp() {
-    const dateLabel = new Date().toLocaleDateString("ar", { day: "2-digit", month: "2-digit", year: "numeric" });
+    // The report must describe the session on screen, not today: this page can
+    // now be opened for a past date.
+    const dateLabel = new Date(session?.date ?? today)
+      .toLocaleDateString("ar", { day: "2-digit", month: "2-digit", year: "numeric" });
     const absents = players.filter((p) => statusByPlayer.get(p.id!)?.status === "غائب").map((p) => p.full_name);
     const retards = players.filter((p) => statusByPlayer.get(p.id!)?.status === "متأخر").map((p) => p.full_name);
     const lines = [
@@ -141,17 +192,59 @@ export default function FlashAttendance() {
         <div>
           <h2 className="text-2xl font-bold">تسجيل الحضور</h2>
           <p className="text-sm text-slate-500">
-            حصة يوم {new Date().toLocaleDateString("ar")} — اضغط على اللاعب لتغيير حالته
+            {session
+              ? `حصة ${session.date}${session.time ? ` · ${session.time}` : ""} — اضغط على اللاعب لتغيير حالته`
+              : "اختر حصة أو أنشئ حصة اليوم"}
           </p>
         </div>
-        <button
-          onClick={shareWhatsApp}
-          className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-white font-medium hover:bg-green-700 transition"
-        >
-          <MessageCircle size={18} />
-          مشاركة التقرير عبر الواتساب
-        </button>
+        {session && players.length > 0 && (
+          <button
+            onClick={shareWhatsApp}
+            className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-white font-medium hover:bg-green-700 transition"
+          >
+            <MessageCircle size={18} />
+            مشاركة التقرير عبر الواتساب
+          </button>
+        )}
       </div>
+
+      {/* Session picker: defaults to today, can open any session. This is what
+          replaced the schedule's own attendance editor. */}
+      {players.length > 0 && (
+        <div className="flex flex-wrap items-end gap-2 rounded-xl border bg-white p-3">
+          <label className="flex-1 text-xs font-medium">
+            الحصة
+            <select
+              value={pickedSessionId ?? ""}
+              onChange={(e) => setPickedSessionId(e.target.value || null)}
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+            >
+              <option value="">
+                {todaySession
+                  ? `اليوم · ${todaySession.date}${todaySession.time ? ` · ${todaySession.time}` : ""} — ${todaySession.type}`
+                  : "اليوم — لا توجد حصة مسجّلة"}
+              </option>
+              {sessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.date}
+                  {s.time ? ` · ${s.time}` : ""} — {s.type}
+                  {s.location ? ` · ${s.location}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!todaySession && (
+            <button
+              onClick={() => void createTodaySession()}
+              disabled={creating}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <CalendarDays size={16} />
+              {creating ? "جارٍ الإنشاء…" : "إنشاء حصة اليوم"}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* No squad yet: explain before offering to create a session, so an empty
           roster is not mistaken for a broken page. */}
@@ -159,7 +252,7 @@ export default function FlashAttendance() {
         <div className="rounded-xl border border-slate-200 bg-white p-5 text-center">
           <h3 className="font-bold">لا يوجد لاعبون في هذه الفئة بعد</h3>
           <p className="mt-1 text-sm text-slate-500">
-            أضف اللاعبين من صفحة «الفرق واللاعبين» لتسجيل الحضور.
+            أضف اللاعبين من صفحة «الفرق واللاعبون» لتسجيل الحضور.
           </p>
           <a
             href="/teams"
@@ -170,13 +263,22 @@ export default function FlashAttendance() {
         </div>
       )}
 
-      {/* No session for today: ask before writing anything to the schedule. */}
+      {/* Nothing to mark: either no sessions exist yet, or none today and none
+          picked from the list above. */}
       {!session && players.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
-          <h3 className="font-bold">لا توجد حصة مسجّلة لهذا اليوم</h3>
+          <h3 className="font-bold">
+            {sessions.length === 0 ? "لا توجد حصص مسجّلة لهذه الفئة" : "لا توجد حصة مسجّلة لهذا اليوم"}
+          </h3>
           <p className="mt-1 text-sm">
-            لتسجيل الحضور، أنشئ حصة اليوم (ستظهر أيضاً في الجدول). يمكنك تحديد الوقت والمكان
-            لاحقاً من صفحة الجدول.
+            {sessions.length === 0 ? (
+              <>أنشئ أول حصة، أو أضفها من صفحة الجدول.</>
+            ) : (
+              <>
+                لتسجيل الحضور، أنشئ حصة اليوم (ستظهر أيضاً في الجدول)، أو اختر حصة سابقة من القائمة
+                أعلاه لتسجيلها متأخراً.
+              </>
+            )}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button

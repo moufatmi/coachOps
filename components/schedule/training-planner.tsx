@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import Link from "next/link";
 import { Plus, Trash2, Pencil, CalendarDays } from "lucide-react";
-import { db, type TrainingSession, type SessionType , newId } from "@/lib/offline/db";
+import { db, type Attendance, type TrainingSession, type SessionType , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
-import SessionDetail from "./session-detail";
 
 const TYPES: SessionType[] = ["تدريب", "مباراة", "لياقة"];
 const emptyForm = { date: new Date().toISOString().slice(0, 10), time: "", type: "تدريب" as SessionType, location: "", notes: "" };
@@ -25,6 +25,41 @@ export default function TrainingPlanner() {
 
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState<TrainingSession | null>(null);
+
+  /**
+   * Head count per session, shown read-only on each row.
+   *
+   * Attendance itself is marked on /attendance, which is the only editor. This
+   * badge exists so the schedule can answer "who turned up?" at a glance without
+   * becoming a second place to change statuses -- that duplication is exactly
+   * what this replaced.
+   */
+  const presentBySession = useLiveQuery(
+    async () => {
+      if (!selectedTeamId) return new Map<string, number>();
+      const mine = new Set(
+        (await db.sessions.where("team_id").equals(selectedTeamId).toArray()).map((s) => s.id!),
+      );
+      const counts = new Map<string, number>();
+      const rows = (await db.attendance.toArray()) as Attendance[];
+      for (const r of rows) {
+        if (r.status !== "حاضر" || !mine.has(r.session_id)) continue;
+        counts.set(r.session_id, (counts.get(r.session_id) ?? 0) + 1);
+      }
+      return counts;
+    },
+    [selectedTeamId],
+    new Map<string, number>(),
+  );
+
+  const squadSize = useLiveQuery(
+    () =>
+      selectedTeamId
+        ? db.players.where("team_id").equals(selectedTeamId).count()
+        : Promise.resolve(0),
+    [selectedTeamId],
+    0,
+  );
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -50,7 +85,6 @@ export default function TrainingPlanner() {
     setForm({ date: s.date, time: s.time ?? "", type: s.type, location: s.location, notes: s.notes ?? "" });
   }
 
-  const [selectedSession, setSelectedSession] = useState<TrainingSession | null>(null);
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -88,25 +122,36 @@ export default function TrainingPlanner() {
         <p className="text-sm text-slate-500">لا توجد حصص بعد.</p>
       ) : (
         <ul className="divide-y rounded-xl border bg-white">
-          {sessions.map((s) => (
+          {sessions.map((s) => {
+            const present = presentBySession.get(s.id!) ?? 0;
+            return (
             <li key={s.id} className="flex items-center justify-between gap-3 px-4 py-3">
-              <button className="text-right" onClick={() => setSelectedSession(s)}>
+              <div className="text-right">
                 <p className="font-medium text-sm">
                   <CalendarDays size={14} className="inline -mt-0.5 me-1 text-slate-400" />
                   {s.date}{s.time ? ` · ${s.time}` : ""} — {s.type}
                   {s.date === today && <span className="ms-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">اليوم</span>}
                 </p>
                 <p className="text-xs text-slate-500">{s.location || "—"}{s.notes ? ` · ${s.notes}` : ""}</p>
-              </button>
-              <span className="flex gap-2">
+              </div>
+              <span className="flex items-center gap-2">
+                {/* Read-only head count; tapping it opens the attendance editor
+                    for that specific session. */}
+                <Link
+                  href={`/attendance?session=${s.id}`}
+                  className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                  title="تسجيل الحضور لهذه الحصة"
+                >
+                  ✓ {present}/{squadSize}
+                </Link>
                 <button onClick={() => edit(s)} className="text-slate-500" aria-label="تعديل"><Pencil size={16} /></button>
                 <button onClick={() => remove(s.id)} className="text-red-500" aria-label="حذف"><Trash2 size={16} /></button>
               </span>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
-      <SessionDetail session={selectedSession} onClose={() => setSelectedSession(null)} />
     </div>
   );
 }
