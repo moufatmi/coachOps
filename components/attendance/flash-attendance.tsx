@@ -82,6 +82,7 @@ export default function FlashAttendance() {
       if (missing.length === 0) return;
       await db.attendance.bulkAdd(
         missing.map((p) => ({
+          id: newId(),
           session_id: sessionId,
           player_id: p.id!,
           status: "حاضر" as const,

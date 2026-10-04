@@ -1,4 +1,4 @@
-import { db, type Club, type CoachProfile, type Team } from "./db";
+import { db, newId, type Club, type CoachProfile, type Team } from "./db";
 import { ownedBy } from "./ownership";
 
 /**
@@ -66,12 +66,14 @@ export async function loadHierarchy(
     // Reuse an existing default club if a previous run already made one.
     let club = clubs.find((c) => c.name === DEFAULT_CLUB_NAME);
     if (!club) {
-      const id = (await db.clubs.add({
+      const id = newId();
+      await db.clubs.add({
+        id,
         name: DEFAULT_CLUB_NAME,
         city: "",
         created_at: new Date().toISOString(),
         owner_id: ownerId,
-      })) as string;
+      });
       club = { id, name: DEFAULT_CLUB_NAME, city: "", created_at: new Date().toISOString(), owner_id: ownerId };
       clubs = [...clubs, club];
     }
@@ -114,12 +116,15 @@ export async function addClub(
   name: string,
   city?: string,
 ): Promise<string> {
-  return (await db.clubs.add({
+  const id = newId();
+  await db.clubs.add({
+    id,
     name: name.trim(),
     city: city?.trim() ?? "",
     created_at: new Date().toISOString(),
     owner_id: ownerId,
-  })) as string;
+  });
+  return id;
 }
 
 export async function updateClub(id: string, patch: Partial<Pick<Club, "name" | "city">>): Promise<void> {
