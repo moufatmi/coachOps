@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil } from "lucide-react";
-import { db, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
+import { db, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
 import { exportAllData, importAllData, resetAllData, deleteTeamCascade } from "@/lib/offline/data";
 import { useSync } from "@/components/sync-provider";
 import { SyncIndicator } from "@/components/sync-indicator";
@@ -13,7 +13,16 @@ import { seedDatabase } from "@/lib/offline/seed";
 import { usePyramid } from "@/components/pyramid-provider";
 import { addClub, saveCoachProfile, deleteClub } from "@/lib/offline/hierarchy";
 
-const CATEGORIES: TeamCategory[] = ["U13", "U15", "U17", "Seniors"];
+/**
+ * Suggested age bands: the built-in defaults plus every category already used
+ * by this coach's age groups, so the list reflects how the coach actually
+ * labels things rather than a fixed set.
+ */
+function buildCategoryOptions(used: string[]): string[] {
+  return [...new Set([...SUGGESTED_TEAM_CATEGORIES, ...used.filter(Boolean)])].sort(
+    (a, b) => a.localeCompare(b, "en", { numeric: true }),
+  );
+}
 
 /**
  * Seeded from the profile prop and remounted via `key` when it changes, so the
@@ -69,6 +78,12 @@ export default function SettingsPanel() {
   const [season, setSeason] = useState("2026/2027");
   const [msg, setMsg] = useState("");
 
+  // Categories already in use by this coach, fed into the picker as suggestions.
+  const categoryOptions = useMemo(
+    () => buildCategoryOptions(groups.map((g) => g.category).filter(Boolean)),
+    [groups],
+  );
+
   const [clubName, setClubName] = useState("");
   const [clubCity, setClubCity] = useState("");
 
@@ -84,13 +99,13 @@ export default function SettingsPanel() {
 
   async function addTeam(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !category.trim()) return;
     // An age group always belongs to a club; fall back to the coach's first one.
     const clubId =
       selectedClubId ?? clubs[0]?.id ?? (await addClub(user!.id, "ناديي"));
     await db.teams.add({
       name: name.trim(),
-      category,
+      category: category.trim(),
       season,
       club_id: clubId,
       created_at: new Date().toISOString(),
@@ -289,18 +304,21 @@ export default function SettingsPanel() {
             />
           </label>
           <label className="text-xs text-slate-500">
-            الفئة
-            <select
+            الفئة العمرية
+            <input
               value={category}
-              onChange={(e) => setCategory(e.target.value as TeamCategory)}
-              className="mt-1 w-24 rounded-lg border px-3 py-2 text-sm"
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="U15"
+              list="team-category-options"
+              className="mt-1 w-28 rounded-lg border px-3 py-2 text-sm"
+            />
+            {/* Suggestions only: the field accepts any value, so academies are
+                not restricted to a fixed set of age bands. */}
+            <datalist id="team-category-options">
+              {categoryOptions.map((c) => (
+                <option key={c} value={c} />
               ))}
-            </select>
+            </datalist>
           </label>
           <label className="text-xs text-slate-500">
             الموسم

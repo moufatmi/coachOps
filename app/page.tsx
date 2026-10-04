@@ -143,7 +143,7 @@ export default function Home() {
             <Building2 className="mx-auto text-slate-300" size={32} />
             <p className="mt-3 font-semibold">ابدأ بإضافة نادي</p>
             <p className="mt-1 text-sm text-slate-500">
-              النادي يجمع فئاتك العمرية (U13, U15, U17, Seniors).
+              النادي يجمع فئاتك العمرية، بأي تسميات تناسبك (U10, U15, U19…).
             </p>
             <Link
               href="/settings"

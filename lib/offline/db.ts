@@ -1,6 +1,26 @@
 import Dexie, { type EntityTable } from "dexie";
 
-export type TeamCategory = "U13" | "U15" | "U17" | "Seniors";
+/**
+ * Free-form on purpose. `category` is `text` in the database and Dexie does not
+ * validate it, and academies do not all use the same age bands (a club might
+ * run U8, U11, U18 and "فريق terminology" of its own). The suggested values in
+ * SUGGESTED_TEAM_CATEGORIES are only a starting point; the category picker also
+ * offers any category already in use by the coach's own age groups.
+ */
+export type TeamCategory = string;
+
+/** Common age bands, offered as suggestions only. */
+export const SUGGESTED_TEAM_CATEGORIES = [
+  "U8",
+  "U10",
+  "U12",
+  "U13",
+  "U15",
+  "U17",
+  "U19",
+  "U21",
+  "Seniors",
+] as const;
 // Free-form on purpose: the field is `text` in the database and Dexie does not
 // validate it, so a coach can keep using whatever wording they like. The
 // canonical choices live in the `POSITIONS` constant in
