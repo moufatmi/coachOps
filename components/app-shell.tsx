@@ -8,13 +8,15 @@ import {
   LayoutDashboard,
   Users,
   ClipboardCheck,
-  Goal,
   Wallet,
   CalendarDays,
   ChevronLeft,
   LogOut,
   Loader2,
   Plus,
+  Archive,
+  Trophy,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,27 +24,66 @@ import { useTeam, usePyramid } from "./pyramid-provider";
 import { useAuth } from "./auth-provider";
 import { useSync } from "./sync-provider";
 import { SyncIndicator } from "./sync-indicator";
+import { useMode } from "./mode-provider";
 import LoginPage from "@/app/login/page";
 import Onboarding from "./onboarding";
 import { addClub } from "@/lib/offline/hierarchy";
 
-/** Pages that operate inside a single age group. */
-const GROUP_PAGES: Array<{ href: string; label: string; icon: LucideIcon }> = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+/**
+ * Training is the week: plan sessions, mark who turned up, collect money.
+ * Match is match day: pick the XI, run the clock, record the result. They are
+ * separate modes rather than one long menu because they are different jobs, and a
+ * coach at the touchline should not have to scroll past subscriptions to reach
+ * the lineup.
+ */
+const TRAINING_PAGES: NavItem[] = [
+  { href: "/", label: "نظرة عامة", icon: LayoutDashboard },
   { href: "/teams", label: "اللاعبون", icon: Users },
   { href: "/schedule", label: "الجدول", icon: CalendarDays },
   { href: "/attendance", label: "الحضور", icon: ClipboardCheck },
-  { href: "/lineup", label: "المخطط التكتيكي", icon: Goal },
   { href: "/finance", label: "المالية", icon: Wallet },
+  { href: "/archives", label: "الأرشيف", icon: Archive },
 ];
+
+const MATCH_PAGES: NavItem[] = [
+  { href: "/lineup", label: "مركز المباراة", icon: Trophy },
+  { href: "/archives", label: "الأرشيف", icon: Archive },
+];
+
+/**
+ * Pages that operate inside a single age group. The overview and the archive
+ * are deliberately absent: both are coach-wide, and hiding the archive until a
+ * group is picked would hide most of a coach's own history.
+ */
+const GROUP_PAGES = ["/teams", "/schedule", "/attendance", "/finance", "/lineup"];
+
+/** Nav items shown regardless of whether an age group is selected. */
+const GLOBAL_HREFS = new Set(["/", "/archives"]);
+
+/**
+ * Every page, in both modes. Used only for breadcrumb labels, which must resolve
+ * a name even when the page is not in the current mode's menu (e.g. after
+ * switching to match mode while sitting on the finance page).
+ */
+const ALL_PAGES: NavItem[] = [...TRAINING_PAGES, ...MATCH_PAGES];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const { user, ready, signOut } = useAuth();
   useSync();
   const pyramid = usePyramid();
+  const { mode, setMode } = useMode();
   const { selectedTeamId, setSelectedTeamId } = useTeam();
   const [addingClub, setAddingClub] = useState(false);
   const [clubName, setClubName] = useState("");
+
+  const pages = mode === "match" ? MATCH_PAGES : TRAINING_PAGES;
 
   // Nothing behind the login screen may render until we know who is signed in.
   if (!ready) {
@@ -64,7 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pyramid.selectClub(id);
   }
 
-  const needsGroup = GROUP_PAGES.some((p) => pathname.startsWith(p.href));
+  const needsGroup = GROUP_PAGES.some((p) => pathname.startsWith(p));
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -77,7 +118,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-3">
-          <SideLink href="/" icon={LayoutDashboard} label="نظرة عامة" active={pathname === "/"} />
+          {/*
+            Mode switch. Two big targets at the top of the sidebar, in the spirit
+            of a football game's main menu, because switching context should not
+            require finding a link.
+          */}
+          <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-800 p-1">
+            <ModeButton
+              active={mode === "training"}
+              onClick={() => setMode("training")}
+              icon={GraduationCap}
+              label="التدريب"
+            />
+            <ModeButton
+              active={mode === "match"}
+              onClick={() => setMode("match")}
+              icon={Trophy}
+              label="المباراة"
+            />
+          </div>
+
+          {pages.map(({ href, label, icon }) => {
+            // Group-scoped pages only appear once a group is chosen; the overview
+            // and archive work for the whole coach.
+            if (!GLOBAL_HREFS.has(href) && !pyramid.selectedGroup) return null;
+            return (
+              <SideLink
+                key={href}
+                href={href}
+                icon={icon}
+                label={label}
+                active={href === "/" ? pathname === "/" : pathname.startsWith(href)}
+              />
+            );
+          })}
 
           <p className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase text-slate-500">
             الأندية
@@ -159,23 +233,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Plus size={14} /> نادي جديد
             </button>
           )}
-
-          {pyramid.selectedGroup && (
-            <>
-              <p className="truncate px-3 pb-1 pt-5 text-[11px] font-semibold uppercase text-slate-500">
-                {pyramid.selectedGroup.name}
-              </p>
-              {GROUP_PAGES.map(({ href, label, icon }) => (
-                <SideLink
-                  key={href}
-                  href={href}
-                  icon={icon}
-                  label={label}
-                  active={pathname.startsWith(href)}
-                />
-              ))}
-            </>
-          )}
         </div>
 
         <div className="border-t border-slate-800 p-2">
@@ -196,10 +253,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         <nav className="flex gap-1 overflow-x-auto border-b bg-white px-2 py-2 md:hidden">
-          <MobileLink href="/" label="نظرة عامة" active={pathname === "/"} />
-          {GROUP_PAGES.map(({ href, label }) => (
-            <MobileLink key={href} href={href} label={label} active={pathname.startsWith(href)} />
-          ))}
+          <button
+            onClick={() => setMode("training")}
+            className={cn(
+              "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium",
+              mode === "training" ? "bg-emerald-600 text-white" : "border bg-white text-slate-600",
+            )}
+          >
+            التدريب
+          </button>
+          <button
+            onClick={() => setMode("match")}
+            className={cn(
+              "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium",
+              mode === "match" ? "bg-emerald-600 text-white" : "border bg-white text-slate-600",
+            )}
+          >
+            المباراة
+          </button>
+          <span className="w-px shrink-0 bg-slate-200" />
+          {pages.map(({ href, label }) =>
+            !GLOBAL_HREFS.has(href) && !pyramid.selectedGroup ? null : (
+              <MobileLink
+                key={href}
+                href={href}
+                label={label}
+                active={href === "/" ? pathname === "/" : pathname.startsWith(href)}
+              />
+            ),
+          )}
           <MobileLink href="/settings" label="الإعدادات" active={pathname === "/settings"} />
         </nav>
 
@@ -222,6 +304,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
     </div>
+  );
+}
+
+/** One of the two large mode targets at the top of the sidebar. */
+function ModeButton({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: LucideIcon;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex flex-col items-center gap-0.5 rounded-lg py-2 text-[11px] font-bold transition-colors",
+        active ? "bg-emerald-600 text-white" : "text-slate-400 hover:bg-slate-700 hover:text-slate-200",
+      )}
+    >
+      <Icon size={17} />
+      {label}
+    </button>
   );
 }
 
@@ -268,7 +377,8 @@ function MobileLink({ href, label, active }: { href: string; label: string; acti
 function Breadcrumb() {
   const pathname = usePathname() ?? "/";
   const { profile, selectedClub, selectedGroup } = usePyramid();
-  const page = GROUP_PAGES.find((p) => pathname.startsWith(p.href))?.label;
+  const { mode } = useMode();
+  const page = ALL_PAGES.find((p) => pathname.startsWith(p.href))?.label;
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-sm">
@@ -291,6 +401,14 @@ function Breadcrumb() {
           <span className="truncate text-emerald-700">{page}</span>
         </>
       )}
+      <span
+        className={cn(
+          "ms-1 rounded-full px-2 py-0.5 text-[10px] font-bold",
+          mode === "match" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800",
+        )}
+      >
+        {mode === "match" ? "وضع المباراة" : "وضع التدريب"}
+      </span>
     </div>
   );
 }

@@ -65,11 +65,18 @@ reopening the installed PWA returns to the same place.
 AuthProvider          → who is signed in
   └─ SyncProvider     → needs a session before pushing
     └─ PyramidProvider→ needs the user id before loading clubs/groups
-      └─ AppShell     → gates rendering on the session
+      └─ ModeProvider → training or match
+        └─ AppShell   → gates rendering on the session, owns navigation
 ```
 
 `AuthProvider` must be outermost because `SyncProvider` reads the session, and
 `PyramidProvider` reads the user id to load the hierarchy.
+
+`ModeProvider` is the navigation mode — training (the week: schedule, attendance,
+money) or match (match day: XI, clock, result). It reads localStorage through
+`useSyncExternalStore` rather than `useState` + `useEffect`: the sidebar must
+render the right menu on the first paint, and an effect that calls `setState`
+guarantees a first render with the wrong menu.
 
 ### State scoping
 

@@ -484,7 +484,7 @@ export default function TacticalBoard() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3 no-print">
         <div>
-          <h2 className="text-2xl font-bold">المخطط التكتيكي</h2>
+          <h2 className="text-2xl font-bold">التشكيلة</h2>
           <p className="text-sm text-slate-500">
             اسحب اللاعبين بحرية على الملعب، أو بدّل وضع القلم وارسم خطة اللعب مباشرة — مثالي للـ iPad.
           </p>
