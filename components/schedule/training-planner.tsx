@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Plus, Trash2, Pencil, CalendarDays } from "lucide-react";
-import { db, type TrainingSession, type SessionType } from "@/lib/offline/db";
+import { db, type TrainingSession, type SessionType , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import SessionDetail from "./session-detail";
@@ -33,12 +33,12 @@ export default function TrainingPlanner() {
       await db.sessions.update(editing.id, { ...form });
       setEditing(null);
     } else {
-      await db.sessions.add({ team_id: selectedTeamId, ...form, owner_id: ownerId });
+      await db.sessions.add({ id: newId(), team_id: selectedTeamId, ...form, owner_id: ownerId });
     }
     setForm(emptyForm);
   }
 
-  async function remove(id?: number) {
+  async function remove(id?: string) {
     if (id == null) return;
     if (!confirm("حذف الحصة؟")) return;
     await db.attendance.where("session_id").equals(id).delete();

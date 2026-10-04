@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Edit2, Plus, Trash2, MessageCircle } from "lucide-react";
-import { db, type Player, type PlayerPosition, type PlayerStatus } from "@/lib/offline/db";
+import { db, type Player, type PlayerPosition, type PlayerStatus , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { attendanceCountsFor } from "@/lib/offline/attendance";
@@ -60,11 +60,11 @@ export default function PlayerDirectory() {
   // disagree about a player's attendance rate.
   const attendanceRates = useLiveQuery(
     async () => {
-      const ids = players.map((p) => p.id).filter((id): id is number => id != null);
+      const ids = players.map((p) => p.id).filter((id): id is string => id != null);
       return attendanceCountsFor(ids);
     },
     [selectedTeamId, players],
-    {} as Record<number, { present: number; total: number }>,
+    {} as Record<string, { present: number; total: number }>,
   );
 
   const filtered = useMemo(() => {
@@ -123,6 +123,7 @@ export default function PlayerDirectory() {
         });
       } else {
         await db.players.add({
+          id: newId(),
           team_id: selectedTeamId,
           full_name: form.full_name,
           jersey_number: jersey,

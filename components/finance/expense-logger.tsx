@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Trash2, Pencil, Plus, X, TrendingDown, Wallet } from "lucide-react";
-import { db, type Expense, type ExpenseCategory } from "@/lib/offline/db";
+import { db, type Expense, type ExpenseCategory , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -105,6 +105,7 @@ export default function ExpenseLogger({ month }: { month: string }) {
       await db.expenses.update(editing.id, payload);
     } else {
       await db.expenses.add({
+        id: newId(),
         team_id: selectedTeamId,
         ...payload,
         created_at: new Date().toISOString(),

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Building2, Users, Rocket, Sparkles, ArrowLeft } from "lucide-react";
-import { db, type TeamCategory } from "@/lib/offline/db";
+import { db, type TeamCategory , newId } from "@/lib/offline/db";
 import { usePyramid } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { addClub, suggestGroupName } from "@/lib/offline/hierarchy";
@@ -47,6 +47,7 @@ export default function Onboarding() {
     setBusy(true);
     try {
       await db.teams.add({
+        id: newId(),
         name: suggestGroupName(category, season),
         category: category.trim(),
         season,

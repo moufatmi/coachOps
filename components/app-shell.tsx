@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   async function createClub(e: React.FormEvent) {
     e.preventDefault();
     if (!clubName.trim() || !user) return;
-    const id = await addClub(user.id, clubName);
+    const id = String(await addClub(user.id, clubName));
     setClubName("");
     setAddingClub(false);
     pyramid.selectClub(id);

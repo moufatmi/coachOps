@@ -109,7 +109,7 @@ export interface EmptySessionScan {
  * have those fields empty. `hasAttendance` is reported so a real session with
  * recorded attendance is easy to exclude before cleaning up.
  */
-export async function findProbablyEmptySessions(teamId?: number): Promise<EmptySessionScan> {
+export async function findProbablyEmptySessions(teamId?: string): Promise<EmptySessionScan> {
   const all = await db.sessions.toArray();
   const scoped = teamId == null ? all : all.filter((s) => s.team_id === teamId);
 
@@ -135,7 +135,7 @@ export async function findProbablyEmptySessions(teamId?: number): Promise<EmptyS
  * their attendance rows. Attendance is removed too: orphaning it would keep
  * attendance percentages (which count every row) permanently skewed.
  */
-export async function deleteSessions(sessionIds: number[]): Promise<void> {
+export async function deleteSessions(sessionIds: string[]): Promise<void> {
   if (sessionIds.length === 0) return;
   await db.transaction("rw", [db.sessions, db.attendance], async () => {
     await db.attendance.where("session_id").anyOf(sessionIds).delete();
@@ -171,7 +171,7 @@ export async function resetAllData() {
   });
 }
 
-export async function deleteTeamCascade(teamId: number) {
+export async function deleteTeamCascade(teamId: string) {
   const players = await db.players.where("team_id").equals(teamId).toArray();
   const playerIds = players.map((p) => p.id!).filter(Boolean);
   const sessions = await db.sessions.where("team_id").equals(teamId).toArray();

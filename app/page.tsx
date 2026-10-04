@@ -27,12 +27,15 @@ export default function Home() {
   const { setSelectedTeamId } = useTeam();
   const { user } = useAuth();
 
-  const groupIds = useMemo(() => tree.flatMap(({ groups }) => groups.map((g) => g.id!)), [tree]);
+  const groupIds = useMemo(
+    () => tree.flatMap(({ groups }) => groups.map((g) => g.id!).filter(Boolean)),
+    [tree],
+  );
 
   const stats = useLiveQuery(
     async () => {
       if (groupIds.length === 0) return null;
-      const ids = new Set(groupIds);
+      const ids = new Set<string>(groupIds);
       const [players, sessions, cotisations, expenses, lineups] = await Promise.all([
         db.players.toArray(),
         db.sessions.toArray(),
@@ -40,7 +43,7 @@ export default function Home() {
         db.expenses.toArray(),
         db.lineups.toArray(),
       ]);
-      const inScope = <T extends { team_id?: number }>(rows: T[]) =>
+      const inScope = <T extends { team_id?: string }>(rows: T[]) =>
         rows.filter((r) => r.team_id != null && ids.has(r.team_id));
 
       const squad = inScope(players);
@@ -81,7 +84,7 @@ export default function Home() {
     null,
   );
 
-  const enterGroup = (clubId: number, group: Team) => {
+  const enterGroup = (clubId: string, group: Team) => {
     selectClub(clubId);
     selectGroup(group.id);
     setSelectedTeamId(group.id);

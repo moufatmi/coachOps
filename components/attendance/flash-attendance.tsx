@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { MessageCircle } from "lucide-react";
-import { db, type AttendanceStatus } from "@/lib/offline/db";
+import { db, type AttendanceStatus , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,7 @@ export default function FlashAttendance() {
     setNotice("");
     try {
       await db.sessions.add({
+        id: newId(),
         team_id: selectedTeamId,
         date: today,
         type: "تدريب",
@@ -99,12 +100,14 @@ export default function FlashAttendance() {
     [],
   );
 
-  const statusByPlayer = new Map(records.map((r) => [r.player_id, { status: r.status, recordId: r.id }]));
+  const statusByPlayer = new Map<string, { status: AttendanceStatus; recordId?: string }>(
+    records.map((r) => [r.player_id, { status: r.status, recordId: r.id }]),
+  );
 
   const counts = { حاضر: 0, غائب: 0, متأخر: 0, معذور: 0 } as Record<AttendanceStatus, number>;
   for (const r of records) counts[r.status]++;
 
-  async function cycleStatus(playerId: number) {
+  async function cycleStatus(playerId: string) {
     const rec = statusByPlayer.get(playerId);
     if (!rec) return;
     const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(rec.status) + 1) % STATUS_CYCLE.length];

@@ -2,7 +2,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { X } from "lucide-react";
-import { db, type AttendanceStatus, type TrainingSession } from "@/lib/offline/db";
+import { db, type AttendanceStatus, type TrainingSession , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -40,7 +40,7 @@ export default function SessionDetail({ session, onClose }: Props) {
 
   const byPlayer = new Map(rows.map((r) => [r.player_id, r]));
 
-  async function cycle(playerId: number) {
+  async function cycle(playerId: string) {
     const existing = byPlayer.get(playerId);
     const nextStatus = existing
       ? STATUS_CYCLE[(STATUS_CYCLE.indexOf(existing.status) + 1) % STATUS_CYCLE.length]
@@ -49,6 +49,7 @@ export default function SessionDetail({ session, onClose }: Props) {
       await db.attendance.update(existing.id, { status: nextStatus });
     } else {
       await db.attendance.add({
+        id: newId(),
         session_id: session!.id!,
         player_id: playerId,
         status: nextStatus,

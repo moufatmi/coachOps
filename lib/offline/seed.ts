@@ -1,4 +1,4 @@
-import { db, type Player } from "./db";
+import { db, newId, type Player } from "./db";
 
 const SAMPLE_PLAYERS: Array<Omit<Player, "id" | "team_id" | "status" | "photo_url">> = [
   { full_name: "يوسف العمراني", jersey_number: 1, position: "حارس مرمى", parent_phone: "+212612000001" },
@@ -36,28 +36,33 @@ export async function seedDatabase(ownerId: string): Promise<boolean> {
   );
   let club = clubs[0];
   if (!club) {
-    const id = (await db.clubs.add({
+    const id = newId();
+    await db.clubs.add({
+      id,
       name: "ناديي",
       city: "",
       created_at: new Date().toISOString(),
       owner_id: ownerId,
-    })) as number;
+    });
     club = { id, name: "ناديي", city: "", created_at: new Date().toISOString(), owner_id: ownerId };
     clubs = [club];
   }
 
-  const teamId = (await db.teams.add({
+  const teamId = newId();
+  await db.teams.add({
+    id: teamId,
     name: "فئة أقل من 15 سنة - U15",
     category: "U15",
     season: "2026/2027",
     club_id: club.id!,
     created_at: new Date().toISOString(),
     owner_id: ownerId,
-  })) as number;
+  });
 
   await db.players.bulkAdd(
     SAMPLE_PLAYERS.map((p) => ({
       ...p,
+      id: newId(),
       team_id: teamId,
       status: "نشط" as const,
       photo_url: "",

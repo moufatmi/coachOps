@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Club, type CoachProfile, type Team } from "@/lib/offline/db";
 import { ownedBy } from "@/lib/offline/ownership";
 import { loadHierarchy, ensureCoachProfile } from "@/lib/offline/hierarchy";
+import { migrateIdsToUuids } from "@/lib/offline/migrate";
 import { useAuth } from "@/components/auth-provider";
 
 /**
@@ -22,13 +23,13 @@ interface PyramidContextValue {
   groups: Team[];
   /** Groups grouped under their club, for the sidebar and home page. */
   tree: Array<{ club: Club; groups: Team[] }>;
-  selectedClubId: number | null;
-  selectedGroupId: number | null;
+  selectedClubId: string | null;
+  selectedGroupId: string | null;
   selectedClub: Club | undefined;
   selectedGroup: Team | undefined;
   /** Accepts `undefined` because entity ids are typed optional. */
-  selectClub: (id: number | null | undefined) => void;
-  selectGroup: (id: number | null | undefined) => void;
+  selectClub: (id: string | null | undefined) => void;
+  selectGroup: (id: string | null | undefined) => void;
   /** True once clubs/groups have been resolved at least once. */
   ready: boolean;
 }
@@ -38,11 +39,9 @@ const PyramidContext = createContext<PyramidContextValue | null>(null);
 const CLUB_KEY = "coachops:selectedClub";
 const GROUP_KEY = "coachops:selectedGroup";
 
-function readStored(key: string): number | null {
+function readStored(key: string): string | null {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(key);
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) ? n : null;
+  return window.localStorage.getItem(key);
 }
 
 export function PyramidProvider({ children }: { children: ReactNode }) {
@@ -50,8 +49,8 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
   const ownerId = user?.id ?? null;
   const displayName = user?.user_metadata?.full_name;
 
-  const [preferredClubId, setPreferredClubId] = useState<number | null>(null);
-  const [preferredGroupId, setPreferredGroupId] = useState<number | null>(null);
+  const [preferredClubId, setPreferredClubId] = useState<string | null>(null);
+  const [preferredGroupId, setPreferredGroupId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   const profile = useLiveQuery(async (): Promise<CoachProfile | undefined> => {
@@ -80,12 +79,35 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
     [] as Team[],
   );
 
+  // Runs once, before any page reads a query result, so integer keys from older
+  // installs are rewritten to UUIDs with their foreign keys remapped.
+  const [schemaReady, setSchemaReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    migrateIdsToUuids()
+      .then((r) => {
+        if (r.migrated && r.brokenRefs > 0) {
+          console.warn(
+            `CoachOps: ${r.brokenRefs} reference(s) could not be matched during the id migration.`,
+          );
+        }
+      })
+      .catch((e) => console.error("Id migration failed:", e))
+      .finally(() => {
+        if (!cancelled) setSchemaReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // One-time reconciliation once ownership has settled: fold pre-club age groups
   // into a default club and guarantee a profile row. Deliberately does NOT seed
   // demo data -- a paying coach must not receive twelve invented players as their
   // first impression. Onboarding is explicit (components/onboarding.tsx).
   useEffect(() => {
-    if (!ownerId || !migrated) return;
+    if (!ownerId || !migrated || !schemaReady) return;
     let cancelled = false;
     (async () => {
       await ensureCoachProfile(ownerId, displayName);
@@ -102,7 +124,7 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ownerId, migrated, displayName]);
+  }, [ownerId, migrated, displayName, schemaReady]);
 
   const selectedClubId = useMemo(() => {
     if (clubs.length === 0) return null;
@@ -126,7 +148,7 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
     return groupsInClub[0].id ?? null;
   }, [groupsInClub, preferredGroupId]);
 
-  const selectClub = useCallback((id: number | null | undefined) => {
+  const selectClub = useCallback((id: string | null | undefined) => {
     const next = id ?? null;
     setPreferredClubId(next);
     if (typeof window !== "undefined") {
@@ -135,7 +157,7 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const selectGroup = useCallback((id: number | null | undefined) => {
+  const selectGroup = useCallback((id: string | null | undefined) => {
     const next = id ?? null;
     setPreferredGroupId(next);
     if (typeof window !== "undefined") {

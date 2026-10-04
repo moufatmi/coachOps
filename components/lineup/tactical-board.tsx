@@ -12,6 +12,7 @@ import {
   type LineupLine,
   type LineupSlot,
   type LineupVenue,
+  newId,
 } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
@@ -169,12 +170,12 @@ function shortName(full: string) {
 function buildAutoLineup(
   formation: string,
   players: Player[],
-): { slots: LineupSlot[]; benchIds: number[]; captainId: number | null } {
+): { slots: LineupSlot[]; benchIds: string[]; captainId: string | null } {
   const template = FORMATIONS[formation];
   if (!template || players.length === 0) {
     return { slots: [], benchIds: [], captainId: null };
   }
-  const used = new Set<number>();
+  const used = new Set<string>();
   const slots: LineupSlot[] = template.map((t) => {
     let candidate = players.find((p) => p.id != null && !used.has(p.id) && lineOfPosition(p.position) === t.line);
     if (!candidate) candidate = players.find((p) => p.id != null && !used.has(p.id));
@@ -208,9 +209,9 @@ export default function TacticalBoard() {
 
   const [formation, setFormation] = useState("4-3-3");
   const [slots, setSlots] = useState<LineupSlot[]>([]);
-  const [benchIds, setBenchIds] = useState<number[]>([]);
-  const [captainId, setCaptainId] = useState<number | null>(null);
-  const [autoFilledTeam, setAutoFilledTeam] = useState<number | null>(null);
+  const [benchIds, setBenchIds] = useState<string[]>([]);
+  const [captainId, setCaptainId] = useState<string | null>(null);
+  const [autoFilledTeam, setAutoFilledTeam] = useState<string | null>(null);
   const [opponent, setOpponent] = useState("");
   const [matchDate, setMatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [venue, setVenue] = useState<LineupVenue>("ملعبنا");
@@ -287,7 +288,7 @@ export default function TacticalBoard() {
     );
   }
 
-  function benchToSlot(slotKey: string, benchPlayerId: number) {
+  function benchToSlot(slotKey: string, benchPlayerId: string) {
     const slot = slots.find((s) => s.key === slotKey);
     if (!slot) return;
     const oldId = slot.player_id;
@@ -364,7 +365,7 @@ export default function TacticalBoard() {
     dragBench.current = true;
     benchDropOk.current = false;
   }
-  function onBenchPointerUp(e: React.PointerEvent, id: number) {
+  function onBenchPointerUp(e: React.PointerEvent, id: string) {
     const wasDrag = dragBench.current;
     dragBench.current = false;
     if (!wasDrag) return;
@@ -414,6 +415,7 @@ export default function TacticalBoard() {
   async function saveLineup() {
     if (!selectedTeamId) return;
     await db.lineups.add({
+      id: newId(),
       team_id: selectedTeamId,
       formation,
       opponent,
@@ -440,7 +442,7 @@ export default function TacticalBoard() {
     setSelectedSlotKey(null);
   }
 
-  async function deleteLineup(id: number) {
+  async function deleteLineup(id: string) {
     await db.lineups.delete(id);
   }
 
@@ -534,7 +536,7 @@ export default function TacticalBoard() {
           القائد
           <select
             value={captainId ?? ""}
-            onChange={(e) => setCaptainId(e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) => setCaptainId(e.target.value || null)}
             className="mt-1 w-56 rounded-lg border px-3 py-2"
           >
             <option value="">— اختر —</option>

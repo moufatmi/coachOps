@@ -10,7 +10,7 @@ import { db, type Attendance, type AttendanceStatus, type Player } from "./db";
  */
 
 export interface AttendanceEntry {
-  sessionId: number;
+  sessionId: string;
   date: string;
   /** yyyy-mm, for grouping a month together. */
   month: string;
@@ -44,7 +44,7 @@ const ATTENDED: AttendanceStatus[] = ["حاضر", "متأخر"];
 
 /** Resolves attendance rows into dated entries, newest session first. */
 export async function getPlayerAttendanceHistory(
-  playerId: number,
+  playerId: string,
 ): Promise<PlayerAttendanceHistory> {
   const rows = await db.attendance.where("player_id").equals(playerId).toArray();
   if (rows.length === 0) {
@@ -156,9 +156,9 @@ export const ATTENDANCE_DOT: Record<AttendanceStatus, string> = {
 
 /** Quick counts for the player directory cards, without resolving sessions. */
 export async function attendanceCountsFor(
-  playerIds: number[],
-): Promise<Record<number, { present: number; total: number }>> {
-  const out: Record<number, { present: number; total: number }> = {};
+  playerIds: string[],
+): Promise<Record<string, { present: number; total: number }>> {
+  const out: Record<string, { present: number; total: number }> = {};
   if (playerIds.length === 0) return out;
   const rows = await db.attendance
     .where("player_id")

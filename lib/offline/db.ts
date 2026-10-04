@@ -1,6 +1,27 @@
 import Dexie, { type EntityTable } from "dexie";
 
 /**
+ * Primary keys are UUIDs, not auto-increment integers.
+ *
+ * With sequential ids, two devices signed into the same account each generate
+ * the sequence 1, 2, 3... independently. The sync then treats device B's
+ * "player 3" as the same row as device A's "player 3" and one silently
+ * overwrites the other. UUIDs are generated per row, so collisions are
+ * impossible and a coach can use a phone and a tablet safely.
+ */
+export function newId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  // Fallback for older browsers / non-secure contexts.
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
  * Free-form on purpose. `category` is `text` in the database and Dexie does not
  * validate it, and academies do not all use the same age bands (a club might
  * run U8, U11, U18 and "فريق terminology" of its own). The suggested values in
@@ -47,7 +68,7 @@ export type ExpenseCategory = "نقل" | "معدات" | "تحكيم" | "صحة �
  * `updated_at` drives the last-write-wins merge in lib/supabase/sync.ts.
  */
 export interface Owned {
-  id?: number;
+  id?: string;
   owner_id?: string;
   updated_at?: string;
 }
@@ -72,8 +93,8 @@ export interface Club extends Owned {
 }
 
 export interface Evaluation extends Owned {
-  player_id: number;
-  team_id: number;
+  player_id: string;
+  team_id: string;
   date: string;
   technique: number; // 1-5
   physique: number; // 1-5
@@ -84,8 +105,8 @@ export interface Evaluation extends Owned {
 }
 
 export interface Cotisation extends Owned {
-  team_id: number;
-  player_id: number;
+  team_id: string;
+  player_id: string;
   month: string; // YYYY-MM
   season: string;
   expected_amount: number;
@@ -98,7 +119,7 @@ export interface Cotisation extends Owned {
 }
 
 export interface Expense extends Owned {
-  team_id: number;
+  team_id: string;
   category: ExpenseCategory;
   amount: number;
   description: string;
@@ -112,28 +133,28 @@ export interface LineupSlot {
   position: string;
   x: number; // 0-100 across pitch
   y: number; // 0-100 down pitch (our goal at bottom)
-  player_id: number | null;
+  player_id: string | null;
 }
 
 export interface LineupScorer {
-  player_id: number;
+  player_id: string;
   goals: number;
 }
 
 export interface Lineup extends Owned {
-  team_id: number;
+  team_id: string;
   formation: string;
   opponent: string;
   date: string;
   venue: LineupVenue;
-  captain_id: number | null;
+  captain_id: string | null;
   slots: LineupSlot[];
-  substitutes: number[];
+  substitutes: string[];
   created_at: string;
   goals_for?: number;
   goals_against?: number;
   scorers?: LineupScorer[];
-  mvp_id?: number | null;
+  mvp_id?: string | null;
 }
 
 export interface Team extends Owned {
@@ -141,7 +162,7 @@ export interface Team extends Owned {
   category: TeamCategory;
   season: string;
   /** The club this age group belongs to. Null only for pre-club rows. */
-  club_id?: number | null;
+  club_id?: string | null;
   /**
    * Default monthly subscription in dirhams, used when creating a player's
    * cotisation for a new month. Per age group because a club may charge
@@ -155,7 +176,7 @@ export interface Team extends Owned {
 export const FALLBACK_MONTHLY_FEE = 200;
 
 export interface Player extends Owned {
-  team_id: number;
+  team_id: string;
   full_name: string;
   jersey_number: number;
   position: PlayerPosition;
@@ -166,7 +187,7 @@ export interface Player extends Owned {
 }
 
 export interface TrainingSession extends Owned {
-  team_id: number;
+  team_id: string;
   date: string;
   type: SessionType;
   location: string;
@@ -175,8 +196,8 @@ export interface TrainingSession extends Owned {
 }
 
 export interface Attendance extends Owned {
-  session_id: number;
-  player_id: number;
+  session_id: string;
+  player_id: string;
   status: AttendanceStatus;
   notes?: string;
 }
@@ -235,6 +256,24 @@ db.version(6).stores({
   teams: "++id, name, category, season, created_at, owner_id, club_id",
   clubs: "++id, name, city, created_at, owner_id",
   coach_profiles: "id, updated_at",
+});
+
+// v7 switches every primary key from an auto-increment integer to a
+// client-generated UUID, so two devices signed into the same account cannot
+// mint the same id and silently overwrite each other. Rows written under v6 and
+// earlier still carry integer keys; migrateIdsToUuids() in lib/offline/migrate.ts
+// rewrites them and remaps every foreign key before the app reads them.
+db.version(7).stores({
+  teams: "id, name, category, season, created_at, owner_id, club_id",
+  clubs: "id, name, city, created_at, owner_id",
+  coach_profiles: "id, updated_at",
+  players: "id, team_id, full_name, jersey_number, position, status, owner_id",
+  sessions: "id, team_id, date, type, owner_id",
+  attendance: "id, session_id, player_id, status, owner_id",
+  lineups: "id, team_id, date, opponent, venue, formation, owner_id",
+  cotisations: "id, team_id, player_id, month, season, status, owner_id",
+  expenses: "id, team_id, category, date, owner_id",
+  evaluations: "id, player_id, team_id, date, owner_id",
 });
 
 /** Every table, for use by backup, export and ownership sweeps. */

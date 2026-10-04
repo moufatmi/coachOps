@@ -71,7 +71,7 @@ export async function loadHierarchy(
         city: "",
         created_at: new Date().toISOString(),
         owner_id: ownerId,
-      })) as number;
+      })) as string;
       club = { id, name: DEFAULT_CLUB_NAME, city: "", created_at: new Date().toISOString(), owner_id: ownerId };
       clubs = [...clubs, club];
     }
@@ -113,16 +113,16 @@ export async function addClub(
   ownerId: string,
   name: string,
   city?: string,
-): Promise<number> {
+): Promise<string> {
   return (await db.clubs.add({
     name: name.trim(),
     city: city?.trim() ?? "",
     created_at: new Date().toISOString(),
     owner_id: ownerId,
-  })) as number;
+  })) as string;
 }
 
-export async function updateClub(id: number, patch: Partial<Pick<Club, "name" | "city">>): Promise<void> {
+export async function updateClub(id: string, patch: Partial<Pick<Club, "name" | "city">>): Promise<void> {
   await db.clubs.update(id, { ...patch, updated_at: new Date().toISOString() });
 }
 
@@ -130,6 +130,6 @@ export async function updateClub(id: number, patch: Partial<Pick<Club, "name" | 
  * Deletes a club. Its age groups are kept (the FK is `on delete set null`) and
  * reappear under a default club, so a mis-click cannot destroy a squad.
  */
-export async function deleteClub(clubId: number): Promise<void> {
+export async function deleteClub(clubId: string): Promise<void> {
   await db.clubs.delete(clubId);
 }

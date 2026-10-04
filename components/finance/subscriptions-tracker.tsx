@@ -10,6 +10,7 @@ import {
   type CotisationStatus,
   type PaymentMethod,
   type Player,
+  newId,
 } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
@@ -93,6 +94,7 @@ export default function SubscriptionsTracker({
           .first();
         if (!existing) {
           await db.cotisations.add({
+            id: newId(),
             team_id: selectedTeamId,
             player_id: p.id,
             month,
@@ -109,7 +111,7 @@ export default function SubscriptionsTracker({
   }, [players, month, selectedTeamId, team?.season, ownerId, monthlyFee]);
 
   const rows = useMemo<SubscriptionRow[]>(() => {
-    const byPlayer = new Map<number, Cotisation>();
+    const byPlayer = new Map<string, Cotisation>();
     for (const c of cotisations) byPlayer.set(c.player_id, c);
     return players
       .filter((p) => p.id != null)

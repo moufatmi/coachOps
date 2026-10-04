@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { MessageCircle, Printer, X } from "lucide-react";
-import { db, type Evaluation, type Player } from "@/lib/offline/db";
+import { db, type Evaluation, type Player , newId } from "@/lib/offline/db";
 import {
   getPlayerAttendanceHistory,
   ATTENDANCE_DOT,
@@ -242,6 +242,7 @@ export default function PlayerProfileModal({ player, onClose }: Props) {
     e.preventDefault();
     if (!player?.id || !selectedTeamId) return;
     await db.evaluations.add({
+      id: newId(),
       player_id: player.id,
       team_id: selectedTeamId,
       date,

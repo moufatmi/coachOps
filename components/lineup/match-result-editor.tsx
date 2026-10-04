@@ -28,14 +28,14 @@ function ResultForm({ lineup, onClose }: { lineup: Lineup; onClose: () => void }
 
   const [goalsFor, setGoalsFor] = useState(lineup.goals_for ?? 0);
   const [goalsAgainst, setGoalsAgainst] = useState(lineup.goals_against ?? 0);
-  const [scorerMap, setScorerMap] = useState<Record<number, number>>(() => {
-    const m: Record<number, number> = {};
+  const [scorerMap, setScorerMap] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
     for (const s of lineup.scorers ?? []) m[s.player_id] = s.goals;
     return m;
   });
-  const [mvpId, setMvpId] = useState<number | null>(lineup.mvp_id ?? null);
+  const [mvpId, setMvpId] = useState<string | null>(lineup.mvp_id ?? null);
 
-  function bump(id: number, delta: number) {
+  function bump(id: string, delta: number) {
     setScorerMap((prev) => {
       const next = { ...prev };
       next[id] = Math.max(0, (next[id] ?? 0) + delta);
@@ -48,7 +48,7 @@ function ResultForm({ lineup, onClose }: { lineup: Lineup; onClose: () => void }
     await db.lineups.update(lineup.id!, {
       goals_for: goalsFor,
       goals_against: goalsAgainst,
-      scorers: Object.entries(scorerMap).map(([pid, goals]) => ({ player_id: Number(pid), goals })),
+      scorers: Object.entries(scorerMap).map(([pid, goals]) => ({ player_id: pid, goals })),
       mvp_id: mvpId,
     });
     onClose();
@@ -84,7 +84,7 @@ function ResultForm({ lineup, onClose }: { lineup: Lineup; onClose: () => void }
 
         <div>
           <label className="block text-xs font-medium">أفضل لاعب في المباراة ⭐
-            <select value={mvpId ?? ""} onChange={(e) => setMvpId(e.target.value ? Number(e.target.value) : null)} className="mt-1 w-full rounded-lg border px-3 py-2">
+            <select value={mvpId ?? ""} onChange={(e) => setMvpId(e.target.value || null)} className="mt-1 w-full rounded-lg border px-3 py-2">
               <option value="">—</option>
               {players.map((p) => <option key={p.id} value={p.id}>#{p.jersey_number} {p.full_name}</option>)}
             </select>

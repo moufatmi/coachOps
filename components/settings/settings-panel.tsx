@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil, CalendarDays } from "lucide-react";
-import { db, FALLBACK_MONTHLY_FEE, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
+import { db, FALLBACK_MONTHLY_FEE, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory , newId } from "@/lib/offline/db";
 import { exportAllData, importAllData, resetAllData, deleteTeamCascade, findProbablyEmptySessions, deleteSessions, localDataStats, type EmptySessionScan } from "@/lib/offline/data";
 import { useSync } from "@/components/sync-provider";
 import { SyncIndicator } from "@/components/sync-indicator";
@@ -90,7 +90,7 @@ export default function SettingsPanel() {
 
   // Cleanup for sessions the old attendance page created implicitly.
   const [scan, setScan] = useState<EmptySessionScan | null>(null);
-  const groupName = (teamId?: number | null) =>
+  const groupName = (teamId?: string | null) =>
     groups.find((g) => g.id === teamId)?.name ?? "فئة محذوفة";
 
   async function scanEmpty() {
@@ -152,6 +152,7 @@ export default function SettingsPanel() {
     const clubId =
       selectedClubId ?? clubs[0]?.id ?? (await addClub(user!.id, "ناديي"));
     await db.teams.add({
+      id: newId(),
       // The name is derived from category + season, so it can never drift out of
       // sync with the age band the coach picked.
       name: suggestGroupName(category, season),
@@ -180,7 +181,7 @@ export default function SettingsPanel() {
   }
 
   async function moveTeam(team: Team, clubId: string) {
-    const target = clubId ? Number(clubId) : null;
+    const target = clubId || null;
     await db.teams.update(team.id!, { club_id: target, updated_at: new Date().toISOString() });
   }
 
@@ -202,7 +203,7 @@ export default function SettingsPanel() {
     });
   }
 
-  async function removeClub(id: number, clubName: string) {
+  async function removeClub(id: string, clubName: string) {
     const affected = (await db.teams.where("club_id").equals(id).count());
     const extra = affected > 0 ? `\n\n${affected} فئة ستبقى محفوظة وتنتقل إلى نادي افتراضي.` : "";
     if (!confirm(`حذف النادي "${clubName}"؟${extra}`)) return;
@@ -258,10 +259,10 @@ export default function SettingsPanel() {
   }
 
   const playersPerTeam = useLiveQuery(async () => {
-    const counts: Record<number, number> = {};
+    const counts: Record<string, number> = {};
     for (const t of groups) if (t.id) counts[t.id] = await db.players.where("team_id").equals(t.id).count();
     return counts;
-  }, [groups], {} as Record<number, number>);
+  }, [groups], {} as Record<string, number>);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -355,7 +356,7 @@ export default function SettingsPanel() {
             النادي
             <select
               value={selectedClubId ?? ""}
-              onChange={(e) => selectClub(Number(e.target.value))}
+              onChange={(e) => selectClub(e.target.value)}
               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
             >
               {clubs.map((c) => (
