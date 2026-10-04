@@ -3,7 +3,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Club, type CoachProfile, type Team } from "@/lib/offline/db";
-import { seedDatabase } from "@/lib/offline/seed";
 import { ownedBy } from "@/lib/offline/ownership";
 import { loadHierarchy, ensureCoachProfile } from "@/lib/offline/hierarchy";
 import { useAuth } from "@/components/auth-provider";
@@ -81,16 +80,14 @@ export function PyramidProvider({ children }: { children: ReactNode }) {
     [] as Team[],
   );
 
-  // One-time reconciliation once ownership has settled: seed if this coach has
-  // nothing yet, and fold pre-club age groups into a default club. The live
-  // queries above pick up whatever this writes.
+  // One-time reconciliation once ownership has settled: fold pre-club age groups
+  // into a default club and guarantee a profile row. Deliberately does NOT seed
+  // demo data -- a paying coach must not receive twelve invented players as their
+  // first impression. Onboarding is explicit (components/onboarding.tsx).
   useEffect(() => {
     if (!ownerId || !migrated) return;
     let cancelled = false;
     (async () => {
-      await seedDatabase(ownerId);
-      // Guarantees a profile row exists so the apex of the pyramid is always
-      // present rather than something pages have to guard against.
       await ensureCoachProfile(ownerId, displayName);
       await loadHierarchy(ownerId);
       if (!cancelled) {

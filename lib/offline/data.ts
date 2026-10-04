@@ -143,6 +143,27 @@ export async function deleteSessions(sessionIds: number[]): Promise<void> {
   });
 }
 
+/**
+ * Erases every table in the local database. Used when an account is deleted,
+ * so a shared device is not left holding the previous coach's roster, payment
+ * records and parents' phone numbers.
+ */
+export async function wipeLocalData(): Promise<void> {
+  const tables = ALL_TABLES.map((name) => db[name]);
+  await db.transaction("rw", tables, async () => {
+    await Promise.all(tables.map((t) => t.clear()));
+  });
+}
+
+/** Number of rows per table, for the "storage used" panel in Settings. */
+export async function localDataStats(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const name of ALL_TABLES) {
+    out[name] = await db[name].count();
+  }
+  return out;
+}
+
 export async function resetAllData() {
   const tables = ALL_TABLES.map((name) => db[name]);
   await db.transaction("rw", tables, async () => {

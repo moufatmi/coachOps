@@ -1,16 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Download, Upload, Trash2, Database, Users, Plus, Building2, UserCircle, Pencil, CalendarDays } from "lucide-react";
 import { db, FALLBACK_MONTHLY_FEE, SUGGESTED_TEAM_CATEGORIES, type CoachProfile, type Team, type TeamCategory } from "@/lib/offline/db";
-import { exportAllData, importAllData, resetAllData, deleteTeamCascade, findProbablyEmptySessions, deleteSessions, type EmptySessionScan } from "@/lib/offline/data";
+import { exportAllData, importAllData, resetAllData, deleteTeamCascade, findProbablyEmptySessions, deleteSessions, localDataStats, type EmptySessionScan } from "@/lib/offline/data";
 import { useSync } from "@/components/sync-provider";
 import { SyncIndicator } from "@/components/sync-indicator";
 import { summarize } from "@/lib/supabase/sync";
 import { useAuth } from "@/components/auth-provider";
 import { seedDatabase } from "@/lib/offline/seed";
 import { usePyramid } from "@/components/pyramid-provider";
+import { ALL_TABLES } from "@/lib/offline/db";
 import { addClub, saveCoachProfile, deleteClub, suggestGroupName } from "@/lib/offline/hierarchy";
 
 /**
@@ -70,7 +71,7 @@ export default function SettingsPanel() {
   // `useTeam()` is scoped to the selected club; management screens need every
   // age group so a coach can move one between clubs.
   const { groups } = usePyramid();
-  const { user } = useAuth();
+  const { user, deleteAccount } = useAuth();
   const { profile, clubs, selectedClubId, selectClub } = usePyramid();
   const { pushNow, pullNow, busy, state, error, lastSyncedAt } = useSync();
   const [category, setCategory] = useState<TeamCategory>("U15");
@@ -94,6 +95,32 @@ export default function SettingsPanel() {
 
   async function scanEmpty() {
     setScan(await findProbablyEmptySessions());
+  }
+
+  const [stats, setStats] = useState<Record<string, number> | null>(null);
+
+  async function loadStats() {
+    setStats(await localDataStats());
+  }
+
+  // Deferred so the initial render matches the server's and the setState does
+  // not run during commit.
+  useEffect(() => {
+    const t = setTimeout(() => void loadStats(), 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  async function removeAccount() {
+    const typed = prompt(
+      "لتأكيد الحذف النهائي، اكتب: حذف حسابي\n\nسيُحذف حسابك وكل بياناتك من السحابة ومن هذا الجهاز.",
+    );
+    if (typed?.trim() !== "حذف حسابي") return;
+    try {
+      await deleteAccount();
+      setMsg("تم حذف الحساب.");
+    } catch (e: unknown) {
+      setMsg(`تعذّر حذف الحساب: ${e instanceof Error ? e.message : "خطأ غير معروف"}`);
+    }
   }
 
   async function purgeEmpty() {
@@ -542,6 +569,44 @@ export default function SettingsPanel() {
               آخر مزامنة: {new Date(lastSyncedAt).toLocaleTimeString("ar")}
             </span>
           )}
+        </div>
+      </section>
+
+      <section className="rounded-xl border bg-white p-5">
+        <h3 className="flex items-center gap-2 font-bold">
+          <UserCircle size={18} /> الخصوصية والحساب
+        </h3>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <a href="/privacy" className="text-emerald-700 hover:underline">سياسة الخصوصية</a>
+          <span className="text-slate-300">·</span>
+          <a href="/terms" className="text-emerald-700 hover:underline">شروط الاستخدام</a>
+          <button onClick={loadStats} className="text-xs text-slate-500 hover:underline">
+            تحديث
+          </button>
+        </div>
+
+        {stats && (
+          <p className="mt-2 text-xs text-slate-500">
+            بياناتك على هذا الجهاز:{" "}
+            {ALL_TABLES.filter((t) => (stats[t] ?? 0) > 0)
+              .map((t) => `${t}: ${stats[t]}`)
+              .join(" · ") || "لا توجد بيانات"}
+          </p>
+        )}
+
+        <div className="mt-4 border-t pt-4">
+          <p className="text-sm font-semibold text-red-700">حذف الحساب نهائياً</p>
+          <p className="mt-1 text-xs text-slate-500">
+            سيُحذف حسابك وكل بياناتك من السحابة ومن هذا الجهاز، ولا يمكن التراجع.
+          </p>
+          <button
+            onClick={() => void removeAccount()}
+            disabled={busy}
+            className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            حذف حسابي
+          </button>
         </div>
       </section>
 

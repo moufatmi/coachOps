@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogIn, UserPlus, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { LogIn, UserPlus, AlertCircle, CheckCircle2, Loader2, Mail } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 
 export default function LoginPage() {
-  const { signIn, signUp, available, user } = useAuth();
+  const { signIn, signUp, available, user, sendReset } = useAuth();
   const router = useRouter();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -30,12 +30,19 @@ export default function LoginPage() {
     try {
       if (mode === "signin") {
         await signIn(email, password);
-      } else {
+      } else if (mode === "signup") {
         const { needsConfirmation } = await signUp(email, password);
         if (needsConfirmation) {
           setNotice("تم إنشاء الحساب. تحقّق من بريدك الإلكتروني لتأكيد الحساب ثم سجّل الدخول.");
           setMode("signin");
         }
+      } else {
+        await sendReset(email);
+        // Deliberately does not reveal whether the address exists.
+        setNotice(
+          "إن كان البريد مسجّلاً لدينا، فقد أُرسلت إليه رسالة لإعادة تعيين كلمة المرور. تحقّق من صندوق الوارد.",
+        );
+        setMode("signin");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "حدث خطأ غير متوقع");
@@ -50,7 +57,11 @@ export default function LoginPage() {
         <div className="text-center">
           <h1 className="text-3xl font-black">CoachOps ⚽</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {mode === "signin" ? "سجّل الدخول لإدارة فريقك" : "أنشئ حساباً جديداً"}
+            {mode === "signin"
+              ? "سجّل الدخول لإدارة فريقك"
+              : mode === "reset"
+                ? "أدخل بريدك وسنرسل لك رابط الاستعادة"
+                : "أنشئ حساباً جديداً"}
           </p>
         </div>
 
@@ -92,19 +103,21 @@ export default function LoginPage() {
               className="mt-1 w-full rounded-lg border px-3 py-2 text-left"
             />
           </label>
-          <label className="block text-sm font-medium">
-            كلمة المرور
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              dir="ltr"
-              className="mt-1 w-full rounded-lg border px-3 py-2 text-left"
-            />
-          </label>
+          {mode !== "reset" && (
+            <label className="block text-sm font-medium">
+              كلمة المرور
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                dir="ltr"
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-left"
+              />
+            </label>
+          )}
 
           <button
             type="submit"
@@ -115,23 +128,58 @@ export default function LoginPage() {
               <Loader2 size={18} className="animate-spin" />
             ) : mode === "signin" ? (
               <LogIn size={18} />
+            ) : mode === "reset" ? (
+              <Mail size={18} />
             ) : (
               <UserPlus size={18} />
             )}
-            {mode === "signin" ? "تسجيل الدخول" : "إنشاء حساب"}
+            {mode === "signin"
+              ? "تسجيل الدخول"
+              : mode === "reset"
+                ? "إرسال رابط الاستعادة"
+                : "إنشاء حساب"}
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === "signin" ? "signup" : "signin");
-              setError("");
-              setNotice("");
-            }}
-            className="w-full text-center text-xs text-slate-500 hover:underline"
-          >
-            {mode === "signin" ? "ليس لديك حساب؟ إنشاء حساب جديد" : "لديك حساب بالفعل؟ تسجيل الدخول"}
-          </button>
+          {mode === "reset" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("signin");
+                setError("");
+                setNotice("");
+              }}
+              className="w-full text-center text-xs text-slate-500 hover:underline"
+            >
+              العودة لتسجيل الدخول
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode(mode === "signin" ? "signup" : "signin");
+                  setError("");
+                  setNotice("");
+                }}
+                className="w-full text-center text-xs text-slate-500 hover:underline"
+              >
+                {mode === "signin"
+                  ? "ليس لديك حساب؟ إنشاء حساب جديد"
+                  : "لديك حساب بالفعل؟ تسجيل الدخول"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("reset");
+                  setError("");
+                  setNotice("");
+                }}
+                className="w-full text-center text-xs text-slate-400 hover:underline"
+              >
+                نسيت كلمة المرور؟
+              </button>
+            </>
+          )}
         </form>
 
         <p className="px-2 text-center text-xs leading-relaxed text-slate-400">

@@ -23,6 +23,7 @@ import { useAuth } from "./auth-provider";
 import { useSync } from "./sync-provider";
 import { SyncIndicator } from "./sync-indicator";
 import LoginPage from "@/app/login/page";
+import Onboarding from "./onboarding";
 import { addClub } from "@/lib/offline/hierarchy";
 
 /** Pages that operate inside a single age group. */
@@ -203,7 +204,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <main className="flex-1 p-4 md:p-8">
-          {needsGroup && !pyramid.selectedGroup && (
+          {/* First run: nothing set up yet, so guide instead of showing an
+              empty shell. Skipped once any club exists. */}
+          {pyramid.ready && pyramid.clubs.length === 0 && (
+            <Onboarding />
+          )}
+
+          {pyramid.ready && pyramid.clubs.length > 0 && needsGroup && !pyramid.selectedGroup && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
               <p className="font-bold">اختر فئة عمرية أولاً</p>
               <p className="mt-1 text-sm">

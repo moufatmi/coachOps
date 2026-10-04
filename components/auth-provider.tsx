@@ -12,6 +12,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase/client";
 import { claimUnownedRows } from "@/lib/offline/ownership";
+import { wipeLocalData } from "@/lib/offline/data";
 
 interface AuthContextValue {
   user: User | null;
@@ -25,6 +26,12 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
+  /** Emails a recovery link. Always reports success, to avoid leaking whether an account exists. */
+  sendReset: (email: string) => Promise<void>;
+  /** Sets a new password from a recovery session. */
+  updatePassword: (password: string) => Promise<void>;
+  /** Irreversibly deletes the account and all of its data. */
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -95,6 +102,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { needsConfirmation: !data.session };
   }, []);
 
+  const sendReset = useCallback(async (email: string) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Supabase غير مهيأ");
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      // Must match an allow-list entry in the Supabase dashboard.
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw new Error(translateAuthError(error.message));
+  }, []);
+
+  /** Completes the flow started by the emailed recovery link. */
+  const updatePassword = useCallback(async (password: string) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Supabase غير مهيأ");
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw new Error(translateAuthError(error.message));
+  }, []);
+
+  /**
+   * Permanently deletes the account and, through the RLS cascade on owner_id,
+   * every row in the cloud. Local rows are wiped too, since they cannot be
+   * attributed to anyone once the account is gone.
+   */
+  const deleteAccount = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Supabase غير مهيأ");
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) throw new Error("يجب تسجيل الدخول أولاً");
+    await wipeLocalData();
+    const { error: delError } = await supabase.auth.admin.deleteUser(data.user.id);
+    if (delError) throw new Error(translateAuthError(delError.message));
+    await supabase.auth.signOut();
+  }, []);
+
   const signOut = useCallback(async () => {
     // Local rows keep their `owner_id`, so signing back in restores this coach's
     // season of work while another coach on the same device still cannot see it.
@@ -102,8 +143,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user: session?.user ?? null, session, ready, migrated, available, signIn, signUp, signOut }),
-    [session, ready, migrated, available, signIn, signUp, signOut],
+    () => ({
+      user: session?.user ?? null,
+      session, ready, migrated, available,
+      signIn, signUp, signOut, sendReset, updatePassword, deleteAccount,
+    }),
+    [session, ready, migrated, available, signIn, signUp, signOut, sendReset, updatePassword, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
