@@ -7,6 +7,7 @@ import { db, type Player, type PlayerPosition, type PlayerStatus , newId } from 
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { attendanceCountsFor } from "@/lib/offline/attendance";
+import { stageDelete } from "@/lib/offline/sync-ledger";
 import PlayerProfileModal from "./player-profile-modal";
 import PlayerPhotoPicker from "./player-photo-picker";
 import PlayerAvatar from "./player-avatar";
@@ -162,6 +163,10 @@ export default function PlayerDirectory() {
     if (p.id == null) return;
     if (!window.confirm(`حذف ${p.full_name} ؟`)) return;
     await db.players.delete(p.id);
+    // Without a tombstone the row stays on the server and comes back on the next
+    // pull. The server's `on delete cascade` clears attendance, cotisations and
+    // evaluations for us once the player itself is really gone.
+    await stageDelete("players", p.id);
   }
 
   return (

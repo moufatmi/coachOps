@@ -20,7 +20,11 @@
     ],
     "paths": {
       "@/*": ["./*"]
-    }
+    },
+    // scripts/*.mts are run directly by node --experimental-strip-types, which
+    // requires real .ts extensions in the specifier. Next.js resolves the app's
+    // own modules through the bundler, so this does not affect the app build.
+    "allowImportingTsExtensions": true
   },
   "include": [
     "next-env.d.ts",

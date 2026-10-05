@@ -6,6 +6,7 @@ import { Trash2, Pencil, Plus, X, TrendingDown, Wallet } from "lucide-react";
 import { db, type Expense, type ExpenseCategory , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
+import { stageDelete } from "@/lib/offline/sync-ledger";
 import { cn } from "@/lib/utils";
 import {
   expensesByCategory,
@@ -120,6 +121,7 @@ export default function ExpenseLogger({ month }: { month: string }) {
     const label = e.description?.trim() ? `${e.category} — ${e.description}` : e.category;
     if (!confirm(`حذف المصروف "${label}" (${money(e.amount)})؟`)) return;
     await db.expenses.delete(e.id!);
+    await stageDelete("expenses", e.id!);
   }
 
   return (

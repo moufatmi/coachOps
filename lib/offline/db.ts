@@ -202,6 +202,28 @@ export interface Attendance extends Owned {
   notes?: string;
 }
 
+/**
+ * A local deletion waiting to be sent to the server. `row_id` is the id of the row
+ * that was removed from its own table.
+ */
+export interface PendingDelete {
+  id?: number;
+  table_name: TableName;
+  row_id: string;
+  deleted_at: string;
+}
+
+/**
+ * Proof that the server once confirmed this row exists. Used to tell "deleted
+ * here or elsewhere" apart from "created here and not pushed yet".
+ */
+export interface SyncedRow {
+  id?: number;
+  table_name: TableName;
+  row_id: string;
+  owner_id: string | null;
+}
+
 // The database name changed at v7 because Dexie cannot alter a primary key on
 // an existing store ("Not yet support for changing primary key"). The previous
 // database is left untouched; migrateFromLegacyDb() copies it across on first
@@ -222,6 +244,8 @@ const db = new Dexie(DB_NAME) as Dexie & {
   cotisations: EntityTable<Cotisation, "id">;
   expenses: EntityTable<Expense, "id">;
   evaluations: EntityTable<Evaluation, "id">;
+  pending_deletes: EntityTable<PendingDelete, "id">;
+  synced_rows: EntityTable<SyncedRow, "id">;
 };
 
 db.version(1).stores({
@@ -283,6 +307,27 @@ db.version(7).stores({
   cotisations: "id, team_id, player_id, month, season, status, owner_id",
   expenses: "id, team_id, category, date, owner_id",
   evaluations: "id, player_id, team_id, date, owner_id",
+});
+
+// v8 adds two bookkeeping tables. They are local-only and deliberately NOT in
+// ALL_TABLES, so they are never pushed to Supabase.
+//
+// `pending_deletes` is the tombstone queue. Deleting a row locally used to be a
+// silent, one-device event: the row vanished from Dexie but stayed on the server,
+// and the next pull (which runs on focus, on visibility change, on sign-in and
+// every two minutes) happily wrote it back. That is why deletes looked rejected
+// and why wiping the cloud tables reappeared a moment later. Now a delete leaves
+// a tombstone behind and lib/supabase/sync.ts issues a real DELETE for it.
+//
+// `synced_rows` remembers which ids the server has confirmed for this coach. It
+// is what makes deletions work in the other direction too: on a pull, a local row
+// that is in this list but missing from the server response has genuinely been
+// deleted (here or on another device) and is removed. A row that is *not* in this
+// list is an unsynced local edit and is never touched, which is what stops a
+// pull from destroying work that has not been pushed yet.
+db.version(8).stores({
+  pending_deletes: "++id, table_name, row_id, deleted_at, [table_name+row_id]",
+  synced_rows: "++id, table_name, row_id, owner_id, [table_name+row_id]",
 });
 
 /** Every table, for use by backup, export and ownership sweeps. */

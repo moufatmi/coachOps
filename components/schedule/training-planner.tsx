@@ -7,6 +7,7 @@ import { Plus, Trash2, Pencil, CalendarDays } from "lucide-react";
 import { db, type Attendance, type TrainingSession, type SessionType , newId } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
+import { stageDelete, stageDeleteMany } from "@/lib/offline/sync-ledger";
 
 const TYPES: SessionType[] = ["تدريب", "مباراة", "لياقة"];
 const emptyForm = { date: new Date().toISOString().slice(0, 10), time: "", type: "تدريب" as SessionType, location: "", notes: "" };
@@ -76,8 +77,14 @@ export default function TrainingPlanner() {
   async function remove(id?: string) {
     if (id == null) return;
     if (!confirm("حذف الحصة؟")) return;
+    const marked = await db.attendance.where("session_id").equals(id).toArray();
     await db.attendance.where("session_id").equals(id).delete();
     await db.sessions.delete(id);
+    await stageDeleteMany(
+      "attendance",
+      marked.map((a) => a.id),
+    );
+    await stageDelete("sessions", id);
   }
 
   function edit(s: TrainingSession) {

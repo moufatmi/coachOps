@@ -1,5 +1,6 @@
 import { db, newId, type Club, type CoachProfile, type Team } from "./db";
 import { ownedBy } from "./ownership";
+import { stageDelete } from "./sync-ledger";
 
 /**
  * The pyramid: coach -> club -> age group (team) -> squad and activity rows.
@@ -132,9 +133,19 @@ export async function updateClub(id: string, patch: Partial<Pick<Club, "name" | 
 }
 
 /**
- * Deletes a club. Its age groups are kept (the FK is `on delete set null`) and
- * reappear under a default club, so a mis-click cannot destroy a squad.
+ * Deletes a club, detaching its age groups.
+ *
+ * Dexie has no foreign keys, so the groups would otherwise keep a `club_id`
+ * pointing at a row that no longer exists and vanish from every screen: the
+ * server's `on delete set null` never runs locally. Detaching them here mirrors
+ * what the server does on the way up, and `loadHierarchy` then folds them under
+ * a default club, so a mis-click cannot destroy a squad.
  */
 export async function deleteClub(clubId: string): Promise<void> {
-  await db.clubs.delete(clubId);
+  const now = new Date().toISOString();
+  await db.transaction("rw", [db.clubs, db.teams], async () => {
+    await db.teams.where("club_id").equals(clubId).modify({ club_id: null, updated_at: now });
+    await db.clubs.delete(clubId);
+  });
+  await stageDelete("clubs", clubId);
 }

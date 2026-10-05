@@ -51,6 +51,12 @@ interface SyncContextValue {
    * device see the first device's work.
    */
   syncNow: () => Promise<void>;
+  /**
+   * The most recent report, or null if nothing has run yet. Kept so the settings
+   * screen can show what actually changed -- rows deleted, duplicates merged --
+   * instead of a blanket "done", which is what made the delete bug invisible.
+   */
+  lastReport: SyncReport | null;
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);
@@ -69,6 +75,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lastReport, setLastReport] = useState<SyncReport | null>(null);
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** True while a push/pull is running, to ignore the writes it performs. */
@@ -90,6 +97,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     let report: SyncReport | null = null;
     try {
       report = await pushToCloud();
+      setLastReport(report);
       if (report.errors.length > 0) {
         setError(report.errors.join(" | "));
         setState("error");
@@ -120,6 +128,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     let report: SyncReport | null = null;
     try {
       report = await pullFromCloud();
+      setLastReport(report);
       if (report.errors.length > 0) {
         setError(report.errors.join(" | "));
         setState("error");
@@ -149,9 +158,30 @@ export function SyncProvider({ children }: { children: ReactNode }) {
    * synced learns what already exists instead of treating its empty local
    * database as the whole truth.
    */
+  /**
+   * Pull then push.
+   *
+   * Order matters, but it is no longer the same order as before. A pull used to
+   * be harmless, so it went first for freshness. Now a pull can delete local
+   * rows (that is how a deletion on another device arrives) and stage nothing,
+   * while a push can delete server rows and clear tombstones. Running the pull
+   * first means the push operates on a local database that matches the server,
+   * and any row the pull restored from a stale peer is settled by the tombstone
+   * the push then applies. Reversing them would let a push resurrect a row the
+   * pull had just removed.
+   *
+   * Pulling first also means a second device picks up the first
+   * device's rows before it sends its own, so a fresh device that has never
+   * synced learns what already exists instead of treating its empty local
+   * database as the whole truth.
+   */
   const syncNow = useCallback(async (): Promise<void> => {
     if (!userId) return;
-    await pullNow();
+    const pulled = await pullNow();
+    // Only push when the pull succeeded. A failed pull can leave the ledger out
+    // of step with the server, and pushing on top of that risks re-uploading rows
+    // the server had already dropped.
+    if (pulled && pulled.errors.length > 0) return;
     await pushNow();
   }, [userId, pullNow, pushNow]);
 
@@ -246,8 +276,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [userId, pullNow]);
 
   const value = useMemo<SyncContextValue>(
-    () => ({ state, lastSyncedAt, error, busy, pushNow, pullNow, syncNow }),
-    [state, lastSyncedAt, error, busy, pushNow, pullNow, syncNow],
+    () => ({ state, lastSyncedAt, error, busy, pushNow, pullNow, syncNow, lastReport }),
+    [state, lastSyncedAt, error, busy, pushNow, pullNow, syncNow, lastReport],
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;

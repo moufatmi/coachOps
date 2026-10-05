@@ -11,6 +11,7 @@ import { useAuth } from "@/components/auth-provider";
 import { seedDatabase } from "@/lib/offline/seed";
 import { usePyramid } from "@/components/pyramid-provider";
 import { addClub, saveCoachProfile, deleteClub, suggestGroupName } from "@/lib/offline/hierarchy";
+import { resetCloud, summarize } from "@/lib/supabase/sync";
 
 /**
  * Suggested age bands: the built-in defaults plus every category already used
@@ -71,7 +72,7 @@ export default function SettingsPanel() {
   const { groups } = usePyramid();
   const { user, deleteAccount } = useAuth();
   const { profile, clubs, selectedClubId, selectClub } = usePyramid();
-  const { syncNow, busy, error, lastSyncedAt } = useSync();
+  const { syncNow, busy, error, lastSyncedAt, lastReport } = useSync();
   const [category, setCategory] = useState<TeamCategory>("U15");
   const [season, setSeason] = useState("2026/2027");
   const [fee, setFee] = useState("");
@@ -197,10 +198,26 @@ export default function SettingsPanel() {
     }
   }
 
+  /**
+   * Wipes both halves.
+   *
+   * Clearing Dexie on its own was useless: the app is local-first, so the very
+   * next push re-uploaded everything that had just been discarded, which made it
+   * look impossible to empty the database. The cloud rows have to go too.
+   */
   async function doReset() {
-    if (!confirm("سيتم حذف جميع البيانات نهائياً. هل أنت متأكد؟")) return;
+    if (!confirm("سيتم حذف جميع البيانات نهائياً من هذا الجهاز ومن السحابة. هل أنت متأكد؟")) return;
+    if (!navigator.onLine) {
+      setMsg("يلزم الاتصال بالإنترنت لحذف البيانات من السحابة");
+      return;
+    }
     await resetAllData();
-    setMsg("تم مسح جميع البيانات");
+    const report = await resetCloud();
+    if (report.errors.length > 0) {
+      setMsg(`تم مسح هذا الجهاز، لكن تعذّر مسح السحابة: ${report.errors.join(" | ")}`);
+      return;
+    }
+    setMsg("تم مسح جميع البيانات من هذا الجهاز والسحابة");
   }
 
   async function doSeed() {
@@ -220,7 +237,10 @@ export default function SettingsPanel() {
   async function doSync() {
     setMsg("جارٍ المزامنة مع السحابة…");
     await syncNow();
-    setMsg("تمت المزامنة مع السحابة ☁️");
+    // syncNow resolves after both halves have run; the report is kept on the
+    // provider so a coach can see how many rows were deleted or merged rather
+    // than an unconditional "done".
+    setMsg(`${lastReport ? summarize(lastReport) : "تمت المزامنة مع السحابة ☁️"}`);
   }
 
   const playersPerTeam = useLiveQuery(async () => {

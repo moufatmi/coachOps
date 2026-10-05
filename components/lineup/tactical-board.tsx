@@ -16,6 +16,7 @@ import {
 } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
+import { stageDelete } from "@/lib/offline/sync-ledger";
 import { cn } from "@/lib/utils";
 import MatchResultEditor from "./match-result-editor";
 
@@ -444,6 +445,7 @@ export default function TacticalBoard() {
 
   async function deleteLineup(id: string) {
     await db.lineups.delete(id);
+    await stageDelete("lineups", id);
   }
 
   function shareWhatsApp() {
