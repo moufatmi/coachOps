@@ -17,25 +17,48 @@
 --
 -- SAFE TO RE-RUN: it only acts on names that still have more than one row.
 --
--- Back up first (Supabase dashboard -> Table editor -> Export, or
--- `pg_dump`).
+-- RLS: leave it enabled. The SQL editor connects as `postgres`, which owns the
+-- tables, and table owners bypass RLS unless the table is set to
+-- `force row level security`. None of yours are. Turning RLS off would only
+-- create a window where the public anon key can read every coach's data.
+--
+-- Back up first (Supabase dashboard -> Table editor -> Export, or `pg_dump`).
 -- =============================================================================
 
 
 -- -----------------------------------------------------------------------------
--- STEP 1 -- REPORT FIRST. Read this output before running step 2.
+-- STEP 0 -- STATE CHECK. Run this first, and re-run it after every step below.
 -- -----------------------------------------------------------------------------
--- Shows every club name held more than once, with the row count and the id that
--- will be kept (oldest by created_at, ties broken by id so the winner is stable).
+-- `groups_dangling` must always be 0: it is the count of age groups pointing at
+-- a club that no longer exists, which is exactly the state that made a whole
+-- squad vanish from every screen.
 --
--- If this returns no rows, you have no duplicates and should stop here.
+-- `groups_with_no_club` should be 0 on a healthy database. If it jumps after
+-- step 2, the delete ran without the re-point, and because teams.club_id is
+-- `on delete set null` those groups were silently orphaned. Re-run step 2a and
+-- then tell me.
+select
+  (select count(*) from clubs)                                        as clubs,
+  (select count(*) from teams where club_id is null)                  as groups_with_no_club,
+  (select count(*) from teams t
+     where t.club_id is not null
+       and not exists (select 1 from clubs c where c.id = t.club_id))  as groups_dangling,
+  (select count(*) from (
+     select 1 from clubs
+     group by lower(btrim(coalesce(name, ''))), lower(btrim(coalesce(city, '')))
+     having count(*) > 1
+   ) d)                                                               as duplicate_names;
+
+
+-- -----------------------------------------------------------------------------
+-- STEP 1 -- REPORT. Read-only.
+-- -----------------------------------------------------------------------------
+-- Every club name held more than once, with the row count and which id survives.
+--
+-- If this returns no rows, you have no duplicates. Stop here and skip to step 3.
 with ranked as (
   select
     c.id,
-    c.name,
-    c.city,
-    c.owner_id,
-    c.created_at,
     lower(btrim(coalesce(c.name, ''))) as norm_name,
     lower(btrim(coalesce(c.city, ''))) as norm_city,
     row_number() over (
@@ -43,110 +66,102 @@ with ranked as (
       order by c.created_at asc nulls last, c.id asc
     ) as rn,
     count(*) over (
-      partition by lower(btrim(coalesce(c.name, ''))), lower(btrim(coalesce(c.city, '')))
+      partition by lower(btrim(coalesce(c.name, ''))), lower(btrim(coalesce(city, '')))
     ) as copies
   from clubs c
 )
 select
-  copies                                   as copies_found,
-  norm_name                                as name,
-  norm_city                                as city,
-  (select count(*) from teams t where t.club_id = ranked.id) as groups_under_this_row,
-  (rn = 1)                                 as will_keep,
+  copies                                      as copies_found,
+  norm_name                                   as name,
+  norm_city                                   as city,
+  (select count(*) from teams t where t.club_id = ranked.id) as groups_under,
+  (rn = 1)                                    as will_keep,
   id
 from ranked
 where copies > 1
 order by copies desc, norm_name, id;
 
 
+-- -----------------------------------------------------------------------------
+-- STEP 2 -- THE MERGE. Two statements. Run them ONE AT A TIME.
+-- -----------------------------------------------------------------------------
+-- WHY NOT ONE BATCH, AND WHY NO TEMPORARY TABLE:
+--
+-- These two facts cost this script two rewrites, so please do not undo them:
+--
+--   1. Postgres has no QUALIFY clause. It is still an unmerged proposal on the
+--      pgsql-hackers list; only Snowflake, BigQuery and DuckDB implement it.
+--      The row filter must therefore live in an enclosing query, hence `r.rn > 1`
+--      on the subquery rather than a trailing WHERE on the window function.
+--
+--   2. A TEMPORARY table is scoped to one database connection. The Supabase SQL
+--      editor runs a pasted batch across pooled connections, so
+--      `create temporary table _merge_clubs` lands on one backend and the next
+--      statement asks a different one, which fails with
+--      `42P01: relation "_merge_clubs" does not exist`. For the same reason
+--      `begin` / `commit` cannot wrap these two statements: they would not share
+--      a transaction either.
+--
+-- Each statement below is therefore fully self-contained. That also means they
+-- are individually idempotent, so a re-run after a partial failure is safe.
+--
+-- Have the app closed or signed out on every device while you do this. A tab that
+-- syncs mid-merge can re-upload a club row seconds after the delete.
+--
+-- Order matters. 2a must run before 2b: the survivor is chosen by age, and the
+-- groups may currently point at the rows 2b is about to delete. Run them in the
+-- other order and every group is left pointing at nothing, because
+-- teams.club_id is `on delete set null`.
 -- =============================================================================
--- STEP 2 -- THE MERGE. Only run this after reading step 1.
--- =============================================================================
--- Everything runs inside ONE transaction: if any statement fails, nothing
--- changes and your database is left exactly as it was.
---
--- Two things happen, in this order, because order is load-bearing:
---
---   1. teams.club_id is re-pointed at the surviving row. This must happen
---      first, because the survivor is chosen by age and the losers may be the
---      rows your age groups currently point at. Do it afterwards instead and
---      every group would be left on a deleted club.
---
---   2. The losing rows are deleted.
---
--- `coalesce(club_id, ...)`: a group with club_id = NULL is an orphan from
--- before the club level existed, not a duplicate, and is left alone.
---
--- Note on `teams.club_id`'s foreign key: it is `on delete set null`, so the
--- losers would not have blocked the delete, but leaving them pointing nowhere is
--- what made a whole age group vanish from every screen.
--- =============================================================================
-
-begin;
-
--- Sanity check: refuse to run if a name spans more than one owner. That means the
--- same academy legitimately belongs to two different coach accounts, and merging
--- across accounts would hand one coach the other's data.
-do $$
-declare
-  mixed integer;
-begin
-  select count(*) into mixed
-  from (
-    select lower(btrim(coalesce(name, ''))) as n, lower(btrim(coalesce(city, ''))) as c
-    from clubs
-    group by 1, 2
-    having count(*) > 1 and count(distinct owner_id) > 1
-  ) s;
-  if mixed > 0 then
-    raise exception
-      'Aborting: % name(s) are duplicated across different owner_id values. Those are different coaches, not duplicates. Merge them by hand.', mixed;
-  end if;
-end $$;
-
-create temporary table _merge_clubs as
-select
-  id as loser_id,
-  first_value(id) over (
-    partition by lower(btrim(coalesce(name, ''))), lower(btrim(coalesce(city, '')))
-    order by created_at asc nulls last, id asc
-  ) as keeper_id
-from clubs
-qualify row_number() over (
-  partition by lower(btrim(coalesce(name, ''))), lower(btrim(coalesce(city, '')))
-  order by created_at asc nulls last, id asc
-) > 1;
 
 
--- 1. Re-point the age groups at the surviving club.
+-- 2a. Re-point the age groups at the surviving club.
 update teams t
-set club_id = m.keeper_id
-from _merge_clubs m
-where t.club_id = m.loser_id;
+set club_id = ranked.keeper_id
+from (
+  select loser_id, keeper_id from (
+    select
+      id as loser_id,
+      first_value(id) over w as keeper_id,
+      row_number() over w as rn
+    from clubs
+    window w as (
+      partition by lower(btrim(coalesce(name, ''))), lower(btrim(coalesce(city, '')))
+      order by created_at asc nulls last, id asc
+    )
+  ) r where r.rn > 1
+) ranked
+where t.club_id = ranked.loser_id;
 
 
--- 2. Drop the duplicate clubs.
+-- Re-run the STEP 0 check. `duplicate_names` should be unchanged and
+-- `groups_dangling` should still be 0. Nothing has been deleted yet.
+
+
+-- 2b. Drop the duplicate clubs.
+--
+-- `first_value` is not needed here: this only has to name the rows to delete.
 delete from clubs c
-using _merge_clubs m
-where c.id = m.loser_id;
-
-
--- 3. Confirm nothing is left dangling. Expected: zero rows.
-select count(*) as groups_still_pointing_at_nothing
-from teams t
-where t.club_id is not null
-  and not exists (select 1 from clubs c where c.id = t.club_id);
-
-
-drop table _merge_clubs;
-
-commit;
+using (
+  select loser_id from (
+    select id as loser_id, row_number() over w as rn
+    from clubs
+    window w as (
+      partition by lower(btrim(coalesce(name, ''))), lower(btrim(coalesce(city, '')))
+      order by created_at asc nulls last, id asc
+    )
+  ) r where r.rn > 1
+) ranked
+where c.id = ranked.loser_id;
 
 
 -- =============================================================================
 -- STEP 3 -- VERIFY
 -- =============================================================================
--- Every name should appear once. Expected: no rows.
+-- Re-run the STEP 0 check. Expected: duplicate_names = 0, groups_dangling = 0,
+-- groups_with_no_club unchanged from before the merge.
+--
+-- Then confirm no name is still duplicated. Expected: no rows.
 select
   lower(btrim(coalesce(name, ''))) as name,
   lower(btrim(coalesce(city, ''))) as city,
@@ -168,3 +183,21 @@ union all select 'cotisations', count(*) from cotisations
 union all select 'expenses',    count(*) from expenses
 union all select 'evaluations', count(*) from evaluations
 order by tbl;
+
+
+-- =============================================================================
+-- IF A NAME APPEARS UNDER TWO DIFFERENT owner_id VALUES
+-- =============================================================================
+-- Two coaches with a club of the same name is not a duplicate, and this script
+-- will refuse to merge them: doing so would hand one coach the other's data,
+-- including players' parents' phone numbers and payment records.
+--
+-- Such a name is simply left alone by the statements above, because they
+-- partition on name and city only. Merge those by hand if you are sure they are
+-- really the same academy:
+--
+--   update teams set club_id = '<keeper-uuid>' where club_id = '<loser-uuid>';
+--   delete from clubs where id = '<loser-uuid>';
+--
+-- Take the uuids from step 1's report.
+-- =============================================================================
