@@ -13,7 +13,7 @@ import {
   MessageCircle,
   TrendingUp,
 } from "lucide-react";
-import { db, type Lineup, type Team, type TrainingSession } from "@/lib/offline/db";
+import { db, lineupKind, type Lineup, type Team, type TrainingSession } from "@/lib/offline/db";
 import { usePyramid, useTeam } from "@/components/pyramid-provider";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -58,7 +58,12 @@ export default function Home() {
       const income = groupCotisations.reduce((s, c) => s + c.paid_amount, 0);
       const spend = groupExpenses.reduce((s, e) => s + e.amount, 0);
 
-      const played = groupLineups.filter((l) => l.goals_for != null && l.goals_against != null);
+      // Only official fixtures count towards the season record. Training matches are
+      // saved the same way but are live experiments, and a 6-0 drill showing up
+      // as the club's worst defeat of the season would be indefensible.
+      const played = groupLineups.filter(
+        (l) => l.goals_for != null && l.goals_against != null && lineupKind(l) === "official",
+      );
       let w = 0, d = 0, l = 0, gf = 0, ga = 0;
       for (const m of played as Array<Lineup & { goals_for: number; goals_against: number }>) {
         gf += m.goals_for;

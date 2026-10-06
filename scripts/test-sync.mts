@@ -22,6 +22,8 @@ import {
   resetCloud,
   mergeDuplicateClubs,
 } from "../lib/supabase/sync.ts";
+import { buildArchive, type ArchiveLineupRow } from "../lib/offline/archive.ts";
+import { lineupKind } from "../lib/offline/db.ts";
 import { addClub, deleteClub } from "../lib/offline/hierarchy.ts";
 import { resetAllData, deletePlayerCascade } from "../lib/offline/data.ts";
 import {
@@ -114,6 +116,58 @@ function useCloud(next: ReturnType<typeof fakeCloud>) {
 }
 
 console.log("\nsync reconciliation\n");
+
+await test("a training match never touches the season record", async () => {
+  const teamId = "t-team-1";
+  const teams = [
+    { id: teamId, name: "U13", season: "2026/2027", category: "U13" },
+  ];
+  const lineups: ArchiveLineupRow[] = [
+    // An official 3-1 win.
+    { id: "l1", team_id: teamId, date: "2026-10-01", kind: "official", goals_for: 3, goals_against: 1 },
+    // A training 7-0 drill. Must be invisible to the record.
+    { id: "l2", team_id: teamId, date: "2026-10-03", kind: "training", goals_for: 7, goals_against: 0 },
+    // A row saved before `kind` existed: an official fixture by definition.
+    { id: "l3", team_id: teamId, date: "2026-10-05", goals_for: 2, goals_against: 2 },
+  ];
+
+  const archive = buildArchive(teams, [], lineups, []);
+  const season = archive.seasons.find((s) => s.season === "2026/2027")!;
+
+  assert.equal(season.record.played, 2, "only the two official fixtures count");
+  assert.equal(season.record.wins, 1);
+  assert.equal(season.record.draws, 1);
+  assert.equal(season.record.losses, 0);
+  assert.equal(season.record.goalsFor, 5, "the drill's 7 must not be added");
+  assert.equal(season.record.goalsAgainst, 3);
+
+  // But it is still listed, flagged, so the coach can see what happened.
+  assert.equal(season.matches.length, 3, "all three are still listed");
+  const drill = season.matches.find((m) => m.id === "l2")!;
+  assert.equal(drill.counted, false);
+  assert.equal(drill.played, true);
+  assert.equal(drill.outcome, "w", "its own outcome is still computed");
+  assert.equal(season.matches.filter((m) => m.counted).length, 2);
+});
+
+await test("an unplayed training match is listed but not recorded", async () => {
+  const archive = buildArchive(
+    [{ id: "t", name: "U13", season: "2026/2027", category: "U13" }],
+    [],
+    [{ id: "l1", team_id: "t", date: "2026-10-01", kind: "training", goals_for: null, goals_against: null }],
+    [],
+  );
+  const season = archive.seasons[0];
+  assert.equal(season.matches.length, 1, "a lineup with no result is still history");
+  assert.equal(season.record.played, 0, "and contributes nothing to the record");
+  assert.equal(season.matches[0].counted, false);
+});
+
+await test("lineupKind treats a missing kind as official", async () => {
+  assert.equal(lineupKind({}), "official", "pre-v9 rows were all fixtures");
+  assert.equal(lineupKind({ kind: "official" }), "official");
+  assert.equal(lineupKind({ kind: "training" }), "training");
+});
 
 await test("deleting a player takes his payment records with him", async () => {
   const c = fakeCloud();

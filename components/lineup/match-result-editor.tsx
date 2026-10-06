@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { X } from "lucide-react";
-import { db, type Lineup, type Player } from "@/lib/offline/db";
+import { db, lineupKind, type Lineup, type Player } from "@/lib/offline/db";
 import { useTeam } from "@/components/pyramid-provider";
 
 interface Props {
@@ -20,6 +20,7 @@ export default function MatchResultEditor({ lineup, onClose }: Props) {
 
 function ResultForm({ lineup, onClose }: { lineup: Lineup; onClose: () => void }) {
   const { selectedTeamId } = useTeam();
+  const training = lineupKind(lineup) === "training";
   const players = useLiveQuery(
     () => (selectedTeamId ? db.players.where("team_id").equals(selectedTeamId).sortBy("jersey_number") : []),
     [selectedTeamId],
@@ -58,7 +59,18 @@ function ResultForm({ lineup, onClose }: { lineup: Lineup; onClose: () => void }
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-4">
         <div className="flex items-center justify-between">
-          <h4 className="font-bold">نتيجة المباراة — ضد {lineup.opponent || "?"}</h4>
+          <div className="min-w-0">
+            <h4 className="truncate font-bold">
+              {training ? "نتيجة مباراة التدريب" : "نتيجة المباراة"} — ضد{" "}
+              {lineup.opponent || "?"}
+            </h4>
+            {/* Repeats the kind because a training scoreline deliberately does
+                not move the season record, and that would otherwise look like a
+                bug the coach has to guess about. */}
+            {training && (
+              <p className="text-xs text-amber-700">لن تُحتسب في سجل الموسم</p>
+            )}
+          </div>
           <button onClick={onClose} aria-label="إغلاق"><X size={18} /></button>
         </div>
 

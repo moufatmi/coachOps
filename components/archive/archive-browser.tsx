@@ -87,6 +87,11 @@ export default function ArchiveBrowser() {
     [activeSeason, query, kinds],
   );
 
+  /** Training matches are listed in the archive but excluded from the record. */
+  const trainingCount = activeSeason
+    ? activeSeason.matches.filter((m) => !m.counted).length
+    : 0;
+
   if (!data) {
     return <div className="py-16 text-center text-sm text-slate-400">جارٍ تحميل الأرشيف…</div>;
   }
@@ -192,7 +197,10 @@ export default function ArchiveBrowser() {
               <p className="text-xs text-slate-500">المباريات</p>
               <p className="mt-1 text-xl font-black">{activeSeason.matches.length}</p>
               <p className="text-xs text-slate-400">
-                {activeSeason.matches.filter((m) => !m.played).length} بلا نتيجة
+                {/* Split so the number a coach reads as "our matches" matches the
+                    season record above it, with training called out separately. */}
+                {activeSeason.matches.filter((m) => m.counted).length} رسمية
+                {trainingCount > 0 && ` · ${trainingCount} تدريب`}
               </p>
             </div>
           </div>
@@ -211,12 +219,23 @@ export default function ArchiveBrowser() {
                     <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
                       <span className="font-medium">{m.date}</span>
                       <span className="min-w-0 flex-1 truncate text-slate-600">
-                        ضد {m.opponent || "؟"} <span className="text-slate-400">({m.formation ?? "—"}, {m.venue ?? "—"})</span>
+                        {/* Training matches are listed but never counted, so the
+                            archive says which is which rather than leaving a
+                            scoreline that disagrees with the season record. */}
+                        {m.counted ? "ضد" : "تدريب ضد"}{" "}
+                        {m.opponent || "؟"}{" "}
+                        <span className="text-slate-400">({m.formation ?? "—"}, {m.venue ?? "—"})</span>
                       </span>
                       <span className="text-xs text-slate-400">{m.teamName}</span>
-                      <span className={cn("rounded-full px-2 py-0.5 text-xs font-bold", OUTCOME_STYLE[m.outcome ?? "none"])}>
-                        {m.played ? `${m.goals_for} - ${m.goals_against}` : OUTCOME_LABEL[m.outcome ?? "none"]}
-                      </span>
+                      {m.counted ? (
+                        <span className={cn("rounded-full px-2 py-0.5 text-xs font-bold", OUTCOME_STYLE[m.outcome ?? "none"])}>
+                          {m.played ? `${m.goals_for} - ${m.goals_against}` : OUTCOME_LABEL[m.outcome ?? "none"]}
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">
+                          {m.played ? `${m.goals_for} - ${m.goals_against}` : "بلا نتيجة"} · تدريب
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

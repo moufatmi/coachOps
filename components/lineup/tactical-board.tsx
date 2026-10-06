@@ -7,8 +7,10 @@ import {
 } from "lucide-react";
 import {
   db,
+  lineupKind,
   type Player,
   type Lineup,
+  type LineupKind,
   type LineupLine,
   type LineupSlot,
   type LineupVenue,
@@ -158,6 +160,68 @@ interface DrawPath {
   color: string;
 }
 
+/**
+ * One row in a saved-lineup list.
+ *
+ * Split out because the official and training lists render the same row with
+ * only a different accent, and duplicating that markup would be two places to
+ * fix every time the result badge changes.
+ */
+function SavedLineupRow({
+  lineup: l,
+  playersById,
+  onLoad,
+  onEditResult,
+  onDelete,
+}: {
+  lineup: Lineup;
+  playersById: Map<string, Player>;
+  onLoad: (l: Lineup) => void;
+  onEditResult: (l: Lineup) => void;
+  onDelete: (id: string) => void;
+}) {
+  const mvp = l.mvp_id != null ? playersById.get(l.mvp_id) : undefined;
+  const against = l.goals_against ?? 0;
+  return (
+    <li className="flex items-center justify-between gap-3 px-4 py-2">
+      <button onClick={() => onLoad(l)} className="text-right text-sm hover:underline">
+        {l.date} — ضد {l.opponent || "?"} ({l.formation}، {l.venue})
+      </button>
+      <span className="flex items-center gap-3">
+        {l.goals_for != null && (
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-xs font-bold",
+              l.goals_for > against
+                ? "bg-emerald-100 text-emerald-800"
+                : l.goals_for < against
+                  ? "bg-red-100 text-red-800"
+                  : "bg-slate-100 text-slate-600",
+            )}
+          >
+            {l.goals_for} - {l.goals_against}
+          </span>
+        )}
+        {mvp && (
+          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">
+            ⭐ {shortName(mvp.full_name)}
+          </span>
+        )}
+        <button onClick={() => onEditResult(l)} className="text-emerald-700 text-xs hover:underline">
+          النتيجة
+        </button>
+        <button
+          onClick={() => l.id != null && onDelete(l.id)}
+          className="text-red-500"
+          aria-label="حذف"
+        >
+          <Trash2 size={16} />
+        </button>
+      </span>
+    </li>
+  );
+}
+
 function shortName(full: string) {
   const parts = full.trim().split(/\s+/);
   return parts[0] ?? full;
@@ -208,6 +272,21 @@ export default function TacticalBoard() {
     [] as Lineup[],
   );
 
+  /**
+   * Official fixtures only. A training match is saved the same way but is not
+   * shown here, so the two never sit in one list where the coach has to work out
+   * which is which.
+   */
+  const officialLineups = useMemo(
+    () => savedLineups.filter((l) => lineupKind(l) === "official"),
+    [savedLineups],
+  );
+
+  const trainingLineups = useMemo(
+    () => savedLineups.filter((l) => lineupKind(l) === "training"),
+    [savedLineups],
+  );
+
   const [formation, setFormation] = useState("4-3-3");
   const [slots, setSlots] = useState<LineupSlot[]>([]);
   const [benchIds, setBenchIds] = useState<string[]>([]);
@@ -216,6 +295,12 @@ export default function TacticalBoard() {
   const [opponent, setOpponent] = useState("");
   const [matchDate, setMatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [venue, setVenue] = useState<LineupVenue>("ملعبنا");
+  /**
+   * Official fixture or training match. Chosen before saving, and it decides two
+   * separate things: whether the result counts towards the season record, and
+   * whether the lineup appears in the archive.
+   */
+  const [kind, setKind] = useState<LineupKind>("official");
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState("");
   const [editingResult, setEditingResult] = useState<Lineup | null>(null);
@@ -418,6 +503,7 @@ export default function TacticalBoard() {
     await db.lineups.add({
       id: newId(),
       team_id: selectedTeamId,
+      kind,
       formation,
       opponent,
       date: matchDate,
@@ -428,7 +514,7 @@ export default function TacticalBoard() {
       created_at: new Date().toISOString(),
       owner_id: ownerId,
     });
-    setSaveMsg("تم حفظ التشكيلة ✓");
+    setSaveMsg(kind === "training" ? "تم حفظ مباراة التدريب ✓" : "تم حفظ التشكيلة ✓");
     setTimeout(() => setSaveMsg(""), 2500);
   }
 
@@ -437,6 +523,9 @@ export default function TacticalBoard() {
     setOpponent(l.opponent);
     setMatchDate(l.date);
     setVenue(l.venue);
+    // Follow the lineup's own kind. Loading an old fixture should not silently
+    // re-save it as a training match, or the other way round.
+    setKind(lineupKind(l));
     setCaptainId(l.captain_id);
     setSlots(l.slots.map((s) => ({ ...s })));
     setBenchIds([...l.substitutes]);
@@ -447,6 +536,13 @@ export default function TacticalBoard() {
     await db.lineups.delete(id);
     await stageDelete("lineups", id);
   }
+
+  const rowActions = {
+    playersById,
+    onLoad: loadLineup,
+    onEditResult: setEditingResult,
+    onDelete: deleteLineup,
+  };
 
   function shareWhatsApp() {
     const captain = captainId != null ? playersById.get(captainId) : undefined;
@@ -506,11 +602,46 @@ export default function TacticalBoard() {
 
       {saveMsg && <p className="text-emerald-600 text-sm no-print">{saveMsg}</p>}
 
+      {/*
+        Which kind of match is being set up. Stated before the pitch, not buried
+        in the save button, because it decides whether the score counts: a coach
+        who means "official" has to be able to see that at a glance.
+      */}
+      <div className="no-print">
+        <p className="text-sm font-medium">نوع المباراة</p>
+        <div className="mt-1 flex gap-2">
+          {(
+            [
+              { value: "official", label: "مباراة رسمية", hint: "تُحتسب في سجل الموسم والأرشيف" },
+              { value: "training", label: "مباراة تدريب", hint: "لا تُحتسب في السجل" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setKind(opt.value)}
+              aria-pressed={kind === opt.value}
+              className={cn(
+                "flex-1 rounded-lg border px-3 py-2 text-start",
+                kind === opt.value
+                  ? opt.value === "training"
+                    ? "border-amber-400 bg-amber-50"
+                    : "border-emerald-500 bg-emerald-50"
+                  : "bg-white hover:bg-slate-50",
+              )}
+            >
+              <span className="block text-sm font-medium">{opt.label}</span>
+              <span className="block text-xs text-slate-500">{opt.hint}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Match details */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 no-print">
         <label className="text-sm font-medium">
           الخصم
-          <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder="مثال: ضد الرجاء البيضاوي U15" className="mt-1 w-full rounded-lg border px-3 py-2" />
+          <input value={opponent} onChange={(e) => setOpponent(e.target.value)} placeholder={kind === "training" ? "مثال: ضد الفئة C" : "مثال: ضد الرجاء البيضاوي U15"} className="mt-1 w-full rounded-lg border px-3 py-2" />
         </label>
         <label className="text-sm font-medium">
           تاريخ المباراة
@@ -712,35 +843,40 @@ export default function TacticalBoard() {
         </div>
       </div>
 
-      {/* Saved lineups */}
+      {/* Saved lineups. Official and training are listed separately: mixing them
+          would leave the coach squinting at a 6-2 next to a league fixture with
+          no way to tell which is which. */}
       <div className="no-print">
         <h3 className="font-bold mb-2">التشكيلات المحفوظة</h3>
-        {savedLineups.length === 0 ? (
+        {officialLineups.length === 0 && trainingLineups.length === 0 ? (
           <p className="text-sm text-slate-500">لا توجد تشكيلة محفوظة.</p>
         ) : (
-          <ul className="divide-y rounded-xl border bg-white">
-            {savedLineups.map((l) => (
-              <li key={l.id} className="flex items-center justify-between gap-3 px-4 py-2">
-                <button onClick={() => loadLineup(l)} className="text-right text-sm hover:underline">
-                  {l.date} — ضد {l.opponent || "?"} ({l.formation}، {l.venue})
-                </button>
-                <span className="flex items-center gap-3">
-                  {l.goals_for != null && (
-                    <span className={cn("rounded-full px-2 py-0.5 text-xs font-bold", l.goals_for > (l.goals_against ?? 0) ? "bg-emerald-100 text-emerald-800" : l.goals_for < (l.goals_against ?? 0) ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600")}>
-                      {l.goals_for} - {l.goals_against}
-                    </span>
-                  )}
-                  {l.mvp_id != null && playersById.get(l.mvp_id) && (
-                    <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">⭐ {playersById.get(l.mvp_id)!.full_name.split(" ")[0]}</span>
-                  )}
-                  <button onClick={() => setEditingResult(l)} className="text-emerald-700 text-xs hover:underline">النتيجة</button>
-                  <button onClick={() => l.id != null && deleteLineup(l.id)} className="text-red-500" aria-label="حذف">
-                    <Trash2 size={16} />
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-4">
+            {officialLineups.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-slate-500">
+                  مباريات رسمية ({officialLineups.length})
+                </p>
+                <ul className="divide-y rounded-xl border bg-white">
+                  {officialLineups.map((l) => (
+                    <SavedLineupRow key={l.id} lineup={l} {...rowActions} />
+                  ))}
+                </ul>
+              </div>
+            )}
+            {trainingLineups.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-slate-500">
+                  مباريات تدريب ({trainingLineups.length})
+                </p>
+                <ul className="divide-y rounded-xl border border-amber-200 bg-amber-50/40">
+                  {trainingLineups.map((l) => (
+                    <SavedLineupRow key={l.id} lineup={l} {...rowActions} />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

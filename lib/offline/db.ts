@@ -141,8 +141,25 @@ export interface LineupScorer {
   goals: number;
 }
 
+/**
+ * Whether a saved lineup was an official fixture or a training match.
+ *
+ * A coach runs two very different things through the same pitch screen. An
+ * official game counts towards the season record and belongs in the archive as
+ * history. A training match is a live experiment: two squads, experimental
+ * shapes, a score that must never touch the season record.
+ *
+ * They are kept apart rather than merged, because the damage of merging is
+ * silent. A 7-0 drill in training would show up as the club's worst defeat of
+ * the season, and nothing on screen would explain why. `undefined` on rows saved
+ * before this field existed means an official game, which is what they were: the
+ * match centre had no training mode until now.
+ */
+export type LineupKind = "official" | "training";
+
 export interface Lineup extends Owned {
   team_id: string;
+  kind?: LineupKind;
   formation: string;
   opponent: string;
   date: string;
@@ -155,6 +172,15 @@ export interface Lineup extends Owned {
   goals_against?: number;
   scorers?: LineupScorer[];
   mvp_id?: string | null;
+}
+
+/**
+ * The kind to assume for a row that has none. Every place that reads `kind` must
+ * go through this, so "old row means official" is stated once instead of being
+ * re-decided at each call site.
+ */
+export function lineupKind(row: { kind?: LineupKind }): LineupKind {
+  return row.kind === "training" ? "training" : "official";
 }
 
 export interface Team extends Owned {
@@ -328,6 +354,15 @@ db.version(7).stores({
 db.version(8).stores({
   pending_deletes: "++id, table_name, row_id, deleted_at, [table_name+row_id]",
   synced_rows: "++id, table_name, row_id, owner_id, [table_name+row_id]",
+});
+
+// v9 splits a saved lineup into an official fixture or a training match. Rows
+// written under v8 and earlier get no `kind`, which lineupKind() reads as
+// "official": the match centre had no training mode before this, so every row
+// already saved is a real fixture. No upgrade step is needed, and adding an
+// index does not rewrite the table.
+db.version(9).stores({
+  lineups: "id, team_id, date, opponent, venue, formation, kind, owner_id",
 });
 
 /** Every table, for use by backup, export and ownership sweeps. */

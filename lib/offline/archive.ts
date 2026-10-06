@@ -35,6 +35,8 @@ export interface ArchiveLineupRow {
   opponent?: string;
   formation?: string;
   venue?: string;
+  /** Absent means an official fixture; see lineupKind() in lib/offline/db.ts. */
+  kind?: "official" | "training";
   goals_for?: number | null;
   goals_against?: number | null;
 }
@@ -60,6 +62,12 @@ export interface ArchiveMatch extends ArchiveLineupRow {
   played: boolean;
   /** Win / draw / loss, or null while the result is missing. */
   outcome: "w" | "d" | "l" | null;
+  /**
+   * Training matches are listed for reference but never counted: an internal
+   * 11-a-side game is not a competitive result, and folding it into the season
+   * record would quietly rewrite the coach's history.
+   */
+  counted: boolean;
 }
 
 export interface ArchiveSeason {
@@ -166,23 +174,30 @@ export function buildArchive(
     // `played` requires both figures. A lineup saved with only one of them is a
     // half-entered result and must not count as a 0-0 draw.
     const played = l.goals_for != null && l.goals_against != null;
+    // Training matches stay visible in the archive but never reach the record.
+    // A missing `kind` is an official fixture, which is what every row saved
+    // before the field existed was.
+    const counted = l.kind !== "training";
     let outcome: ArchiveMatch["outcome"] = null;
     if (played) {
       const gf = l.goals_for as number;
       const ga = l.goals_against as number;
       outcome = gf > ga ? "w" : gf < ga ? "l" : "d";
-      entry.record.played++;
-      entry.record.goalsFor += gf;
-      entry.record.goalsAgainst += ga;
-      if (outcome === "w") entry.record.wins++;
-      else if (outcome === "d") entry.record.draws++;
-      else entry.record.losses++;
+      if (counted) {
+        entry.record.played++;
+        entry.record.goalsFor += gf;
+        entry.record.goalsAgainst += ga;
+        if (outcome === "w") entry.record.wins++;
+        else if (outcome === "d") entry.record.draws++;
+        else entry.record.losses++;
+      }
     }
     entry.matches.push({
       ...l,
       teamName: teamById.get(l.team_id)?.name ?? "فئة محذوفة",
       played,
       outcome,
+      counted,
     });
     bySeason.set(season, entry);
   }
