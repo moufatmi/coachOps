@@ -12,7 +12,7 @@ import {
   type Team,
   type TrainingSession,
 } from "./db";
-import { forgetAllSynced, stageDeleteMany } from "./sync-ledger";
+import { forgetAllSynced, stageDelete, stageDeleteMany } from "./sync-ledger";
 
 /**
  * Narrow an untrusted JSON value to an array of `T`. Backup files are user
@@ -148,6 +148,60 @@ export async function resetAllData() {
   await forgetAllSynced();
 }
 
+/**
+ * Deletes a player and everything attached to them.
+ *
+ * Attendance, cotisations and evaluations are all `on delete cascade` off
+ * `players` on the server, so a push that removes the player makes Postgres clear
+ * them there. Dexie has no foreign keys, so they have to go here too: leaving
+ * them behind meant the next push re-sent a payment record for a player who no
+ * longer existed, and the server rejected the entire cotisations table with
+ * `cotisations_player_id_fkey`. The error cleared itself a couple of minutes later
+ * when a background pull pruned the leftovers, which made it look like a random
+ * sync blip rather than a broken delete.
+ *
+ * Same shape as deleteTeamCascade: collect the ids, delete them, and tombstone
+ * the lot inside one transaction, so a tombstone can never outlive a
+ * half-applied delete.
+ *
+ * A lineup is deliberately left alone. Its `slots`, `scorers` and `mvp_id` are
+ * jsonb holding bare player ids, not foreign keys, so the server keeps those rows
+ * and there is nothing to violate. The pitch simply shows an empty slot.
+ */
+export async function deletePlayerCascade(playerId: string): Promise<void> {
+  const attendance = await db.attendance.where("player_id").equals(playerId).toArray();
+  const cotisations = await db.cotisations.where("player_id").equals(playerId).toArray();
+  const evaluations = await db.evaluations.where("player_id").equals(playerId).toArray();
+
+  await db.transaction(
+    "rw",
+    // pending_deletes must be in scope: the tombstones are written here, and a
+    // Dexie transaction can only touch the stores it was given. Leaving it out
+    // fails with NotFoundError on the object store rather than a clear error.
+    [db.players, db.attendance, db.cotisations, db.evaluations, db.pending_deletes],
+    async () => {
+      await db.attendance.where("player_id").equals(playerId).delete();
+      await db.cotisations.where("player_id").equals(playerId).delete();
+      await db.evaluations.where("player_id").equals(playerId).delete();
+      await db.players.delete(playerId);
+
+      await stageDeleteMany(
+        "attendance",
+        attendance.map((r) => r.id),
+      );
+      await stageDeleteMany(
+        "cotisations",
+        cotisations.map((r) => r.id),
+      );
+      await stageDeleteMany(
+        "evaluations",
+        evaluations.map((r) => r.id),
+      );
+      await stageDelete("players", playerId);
+    },
+  );
+}
+
 export async function deleteTeamCascade(teamId: string) {
   const players = await db.players.where("team_id").equals(teamId).toArray();
   const playerIds = players.map((p) => p.id!).filter(Boolean);
@@ -170,7 +224,19 @@ export async function deleteTeamCascade(teamId: string) {
 
   await db.transaction(
     "rw",
-    [db.teams, db.players, db.sessions, db.attendance, db.lineups, db.cotisations, db.expenses, db.evaluations],
+    // pending_deletes is in scope because the tombstones are staged below; a
+    // Dexie transaction may only touch the stores it was handed.
+    [
+      db.teams,
+      db.players,
+      db.sessions,
+      db.attendance,
+      db.lineups,
+      db.cotisations,
+      db.expenses,
+      db.evaluations,
+      db.pending_deletes,
+    ],
     async () => {
       const attendanceBySession = await db.attendance
         .where("session_id")

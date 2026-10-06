@@ -7,7 +7,7 @@ import { db, type Player, type PlayerPosition, type PlayerStatus , newId } from 
 import { useTeam } from "@/components/pyramid-provider";
 import { useOwnerId } from "@/components/auth-provider";
 import { attendanceCountsFor } from "@/lib/offline/attendance";
-import { stageDelete } from "@/lib/offline/sync-ledger";
+import { deletePlayerCascade } from "@/lib/offline/data";
 import PlayerProfileModal from "./player-profile-modal";
 import PlayerPhotoPicker from "./player-photo-picker";
 import PlayerAvatar from "./player-avatar";
@@ -159,14 +159,18 @@ export default function PlayerDirectory() {
     }
   }
 
+  /**
+   * Deletes a player after confirmation.
+   *
+   * The cascade lives in lib/offline/data.ts rather than here so it can be
+   * tested directly: it has to remove the player's payment records too, and
+   * getting that wrong only shows up as an opaque foreign-key error minutes
+   * later.
+   */
   async function deletePlayer(p: Player) {
     if (p.id == null) return;
     if (!window.confirm(`حذف ${p.full_name} ؟`)) return;
-    await db.players.delete(p.id);
-    // Without a tombstone the row stays on the server and comes back on the next
-    // pull. The server's `on delete cascade` clears attendance, cotisations and
-    // evaluations for us once the player itself is really gone.
-    await stageDelete("players", p.id);
+    await deletePlayerCascade(p.id);
   }
 
   return (

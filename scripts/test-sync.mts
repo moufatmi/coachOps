@@ -23,7 +23,7 @@ import {
   mergeDuplicateClubs,
 } from "../lib/supabase/sync.ts";
 import { addClub, deleteClub } from "../lib/offline/hierarchy.ts";
-import { resetAllData } from "../lib/offline/data.ts";
+import { resetAllData, deletePlayerCascade } from "../lib/offline/data.ts";
 import {
   stageDelete,
   stagedDeletes,
@@ -114,6 +114,96 @@ function useCloud(next: ReturnType<typeof fakeCloud>) {
 }
 
 console.log("\nsync reconciliation\n");
+
+await test("deleting a player takes his payment records with him", async () => {
+  const c = fakeCloud();
+  useCloud(c);
+  const teamId = newId();
+  const playerId = newId();
+  const sessionId = newId();
+  await db.teams.add({
+    id: teamId,
+    name: "U13",
+    category: "U13",
+    season: "2026/2027",
+    club_id: null,
+    created_at: new Date().toISOString(),
+    owner_id: UID,
+  });
+  await db.players.add({
+    id: playerId,
+    team_id: teamId,
+    full_name: "Youssef",
+    jersey_number: 9,
+    position: "FWD",
+    parent_phone: "",
+    status: "نشط",
+    owner_id: UID,
+  });
+  await db.sessions.add({
+    id: sessionId,
+    team_id: teamId,
+    date: "2026-10-01",
+    type: "تدريب",
+    location: "Carbon",
+    owner_id: UID,
+  });
+  await db.cotisations.add({
+    id: newId(),
+    team_id: teamId,
+    player_id: playerId,
+    month: "2026-10",
+    season: "2026/2027",
+    expected_amount: 200,
+    paid_amount: 200,
+    status: "paid",
+    created_at: new Date().toISOString(),
+    owner_id: UID,
+  });
+  await db.attendance.add({
+    id: newId(),
+    session_id: sessionId,
+    player_id: playerId,
+    status: "حاضر",
+    owner_id: UID,
+  });
+  await db.evaluations.add({
+    id: newId(),
+    player_id: playerId,
+    team_id: teamId,
+    date: "2026-10-01",
+    technique: 4,
+    physique: 4,
+    tactique: 3,
+    mental: 5,
+    created_at: new Date().toISOString(),
+    owner_id: UID,
+  });
+
+  await pushToCloud(c.client as never, UID);
+  assert.equal(c.rows("cotisations").length, 1, "precondition: synced");
+
+  // The exact call the delete button makes in components/teams/player-directory.
+  await deletePlayerCascade(playerId);
+
+  // The local database must not keep rows for a player who is gone. This is the
+  // regression: they used to survive here and were re-sent by the next push,
+  // which the server rejected with cotisations_player_id_fkey.
+  assert.equal((await db.players.toArray()).length, 0);
+  assert.equal((await db.cotisations.toArray()).length, 0, "payment records must go");
+  assert.equal((await db.attendance.toArray()).length, 0, "attendance must go");
+  assert.equal((await db.evaluations.toArray()).length, 0, "evaluations must go");
+
+  // And the push must now be accepted: no row references a missing player.
+  const report = await pushToCloud(c.client as never, UID);
+  assert.deepEqual(report.errors, [], `push should be clean, got: ${report.errors}`);
+  assert.equal(c.rows("players").length, 0);
+  assert.equal(c.rows("cotisations").length, 0);
+  assert.equal(c.rows("attendance").length, 0);
+  assert.equal(c.rows("evaluations").length, 0);
+  // The session itself survives: only the player's attendance row was tied to him.
+  assert.equal(c.rows("sessions").length, 1, "unrelated rows must be kept");
+});
 
 await test("a deleted club is removed from the server, not restored", async () => {
   const c = fakeCloud();
