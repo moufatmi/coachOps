@@ -13,7 +13,7 @@ import {
   MessageCircle,
   TrendingUp,
 } from "lucide-react";
-import { db, type Lineup, type Team } from "@/lib/offline/db";
+import { db, type Lineup, type Team, type TrainingSession } from "@/lib/offline/db";
 import { usePyramid, useTeam } from "@/components/pyramid-provider";
 import { useAuth } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,9 @@ export default function Home() {
     () => tree.flatMap(({ groups }) => groups.map((g) => g.id!).filter(Boolean)),
     [tree],
   );
+
+  /** Next session per age group, keyed by team id. Empty until the query lands. */
+  
 
   const stats = useLiveQuery(
     async () => {
@@ -66,9 +69,27 @@ export default function Home() {
       }
 
       const today = new Date().toISOString().slice(0, 10);
-      const upcoming = groupSessions
-        .filter((s) => s.date >= today)
-        .sort((a, b) => a.date.localeCompare(b.date))[0];
+
+      /**
+       * Next session per age group.
+       *
+       * A single "next session" across the whole pyramid was misleading: a club
+       * with three age groups trains three times a week, so the one nearest
+       * session usually belonged to whichever group happened to be scheduled
+       * first and the other groups looked like they had nothing planned. Keying
+       * by team_id lets each group report its own, which is also the only useful
+       * answer when deciding where to go today.
+       *
+       * Today counts as upcoming, since a session this afternoon is still ahead.
+       */
+      const nextByGroup = new Map<string, TrainingSession>();
+      for (const s of groupSessions) {
+        if (s.team_id == null || s.date < today) continue;
+        const held = nextByGroup.get(s.team_id);
+        if (!held || sessionSortKey(s) < sessionSortKey(held)) {
+          nextByGroup.set(s.team_id, s);
+        }
+      }
 
       return {
         players: squad.length,
@@ -77,18 +98,67 @@ export default function Home() {
         income,
         spend,
         record: { w, d, l, gf, ga, played: played.length },
-        upcoming,
+        nextByGroup: [...nextByGroup] as Array<[string, TrainingSession]>,
       };
     },
     [groupIds.join(",")],
     null,
   );
 
+  /**
+   * Resolves a session's age group back to the club and team rows, so the
+   * upcoming list can label and open each entry. Built from `tree` rather than
+   * looked up per row, because the pyramid is already in memory and a
+   * per-session query would re-read the whole table for every row.
+   */
+  const { upcomingList, groupClubId, groupTeam } = useMemo(() => {
+    const clubById = new Map<string | undefined, string>(
+      tree.map(({ club }) => [club.id, club.name]),
+    );
+    const teamById = new Map<string, Team>();
+    const owner = new Map<string, string>();
+
+    for (const { club, groups } of tree) {
+      for (const g of groups) {
+        if (!g.id) continue;
+        teamById.set(g.id, g);
+        if (club.id) owner.set(g.id, club.id);
+      }
+    }
+
+    const rows = (stats?.nextByGroup ?? [])
+      .map(([teamId, session]) => {
+        const group = teamById.get(teamId);
+        if (!group) return null;
+        const clubId = owner.get(teamId);
+        return {
+          session,
+          group: group.name,
+          club: (clubId ? clubById.get(clubId) : undefined) ?? "—",
+          sortKey: sessionSortKey(session),
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r != null)
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+    return { upcomingList: rows, groupClubId: owner, groupTeam: teamById };
+  }, [tree, stats]);
+
   const enterGroup = (clubId: string, group: Team) => {
     selectClub(clubId);
     selectGroup(group.id);
     setSelectedTeamId(group.id);
   };
+
+  /**
+   * Next session per age group, keyed by team id. Derived after `stats` lands,
+   * so it is an empty map until the first query resolves and every group falls
+   * back to "no session scheduled" rather than flickering a stale value.
+   */
+  const nextByGroup = useMemo(
+    () => new Map<string, TrainingSession>(stats?.nextByGroup ?? []),
+    [stats],
+  );
 
   return (
     <div className="space-y-6">
@@ -157,7 +227,14 @@ export default function Home() {
           </div>
         )}
 
-        {tree.map(({ club, groups }) => (
+        {tree.map(({ club, groups }) => {
+          // Soonest session across this club's age groups, for the header line.
+          const clubNext = groups
+            .map((g) => (g.id ? nextByGroup.get(g.id) : undefined))
+            .filter((s): s is TrainingSession => s != null)
+            .sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)))[0];
+
+          return (
           <section key={club.id} className="overflow-hidden rounded-xl border bg-white shadow-sm">
             <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3">
               <div className="flex items-center gap-2">
@@ -167,9 +244,21 @@ export default function Home() {
                   {club.city && <p className="text-xs text-slate-500">{club.city}</p>}
                 </div>
               </div>
-              <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs text-slate-700">
-                {groups.length} {groups.length === 1 ? "فئة" : "فئات"}
-              </span>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs text-slate-700">
+                  {groups.length} {groups.length === 1 ? "فئة" : "فئات"}
+                </span>
+                {/* The club's soonest session across its age groups, so the two
+                    levels agree: each group shows its own, the club header shows
+                    the first of them. */}
+                {clubNext && (
+                  <span className="flex items-center gap-1 text-xs text-emerald-700">
+                    <CalendarDays size={12} />
+                    {relativeDay(clubNext.date)}
+                    {clubNext.time ? ` · ${clubNext.time}` : ""}
+                  </span>
+                )}
+              </div>
             </div>
 
             {groups.length === 0 ? (
@@ -178,39 +267,90 @@ export default function Home() {
               </p>
             ) : (
               <ul className="divide-y">
-                {groups.map((group) => (
-                  <li key={group.id}>
-                    <button
-                      onClick={() => enterGroup(club.id!, group)}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-start hover:bg-slate-50"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{group.name}</p>
-                        <p className="text-xs text-slate-500">
-                          {group.category}
-                          {group.season ? ` · موسم ${group.season}` : ""}
-                        </p>
-                      </div>
-                      <ChevronLeft size={18} className="shrink-0 text-slate-400" />
-                    </button>
-                  </li>
-                ))}
+                {groups.map((group) => {
+                  const next = group.id ? nextByGroup.get(group.id) : undefined;
+                  return (
+                    <li key={group.id}>
+                      <button
+                        onClick={() => enterGroup(club.id!, group)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-start hover:bg-slate-50"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{group.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {group.category}
+                            {group.season ? ` · موسم ${group.season}` : ""}
+                          </p>
+                          {/* Each age group reports its own next session, so a
+                              coach with several groups can see at a glance which
+                              one trains next instead of guessing. */}
+                          {next ? (
+                            <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
+                              <CalendarDays size={12} className="shrink-0" />
+                              <span className="truncate">
+                                {relativeDay(next.date)} · {next.type}
+                                {next.time ? ` · ${next.time}` : ""}
+                                {next.location ? ` · ${next.location}` : ""}
+                              </span>
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-xs text-slate-400">
+                              لا توجد حصة مبرمجة
+                            </p>
+                          )}
+                        </div>
+                        <ChevronLeft size={18} className="shrink-0 text-slate-400" />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
-        ))}
+          );
+        })}
       </div>
 
-      {stats?.upcoming && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
-          <h3 className="flex items-center gap-2 font-bold text-emerald-900">
-            <CalendarDays size={18} /> الحصة القادمة
+      {/*
+        Everything upcoming, ordered. The pyramid above now shows the next
+        session per age group, which answers "when does this group train next",
+        but a coach with several groups still needs one ordered list to answer
+        "where am I going today", and that is what this is. It is the same data,
+        keyed differently, so the two can never disagree.
+      */}
+      {upcomingList.length > 0 && (
+        <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <h3 className="flex items-center gap-2 font-bold">
+            <CalendarDays size={18} /> الحصص القادمة
           </h3>
-          <p className="mt-1 text-sm text-emerald-800">
-            {stats.upcoming.type} — {stats.upcoming.date}
-            {stats.upcoming.time ? ` · ${stats.upcoming.time}` : ""}
-            {stats.upcoming.location ? ` · ${stats.upcoming.location}` : ""}
-          </p>
+          <ul className="mt-3 divide-y">
+            {upcomingList.map(({ club, group, session }) => (
+              <li key={session.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {relativeDay(session.date)} · {session.type}
+                    {session.time ? ` · ${session.time}` : ""}
+                  </p>
+                  {/* The club and age group each session belongs to, so a
+                      combined list is still unambiguous. */}
+                  <p className="truncate text-xs text-slate-500">
+                    {club} · {group}
+                    {session.location ? ` · ${session.location}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    const clubId = groupClubId.get(group);
+                    const target = groupTeam.get(group);
+                    if (clubId && target) enterGroup(clubId, target);
+                  }}
+                  className="shrink-0 rounded-lg border px-3 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  فتح
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -232,6 +372,38 @@ export default function Home() {
       {!ready && <p className="text-center text-xs text-slate-400">جارٍ تحميل الهرم…</p>}
     </div>
   );
+}
+
+/**
+ * Sort key for a session: date, then time.
+ *
+ * `time` is free-form text typed by the coach, so it is normalised here rather
+ * than trusted: "9:00" and "09:00" have to compare as equal, and a session with
+ * no time must sort last within its day instead of jumping to the front. Anything
+ * unparseable also sorts last, which is why the fallback is a high sentinel
+ * rather than an empty string.
+ */
+function sessionSortKey(s: { date: string; time?: string }): string {
+  const raw = (s.time ?? "").trim();
+  const parsed = /^(\d{1,2})[:h.]?(\d{2})?/.exec(raw);
+  const time = parsed
+    ? `${String(parsed[1]).padStart(2, "0")}:${(parsed[2] ?? "00").padStart(2, "0")}`
+    : "99:99";
+  return `${s.date} ${time}`;
+}
+
+/**
+ * A session date relative to today, falling back to the raw date once it is far
+ * enough away that "in 12 days" stops being useful.
+ */
+function relativeDay(date: string, today = new Date().toISOString().slice(0, 10)): string {
+  if (date === today) return "اليوم";
+  const target = new Date(`${date}T00:00:00`);
+  const base = new Date(`${today}T00:00:00`);
+  const days = Math.round((target.getTime() - base.getTime()) / 86_400_000);
+  if (days === 1) return "غداً";
+  if (days > 1 && days <= 6) return `بعد ${days} أيام`;
+  return date;
 }
 
 function Stat({
