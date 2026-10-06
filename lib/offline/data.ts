@@ -7,6 +7,7 @@ import {
   type Evaluation,
   type Expense,
   type Lineup,
+  type OpponentCrest,
   type Player,
   type TableName,
   type Team,
@@ -38,7 +39,18 @@ function stripOwner<T extends { owner_id?: string }>(rows: T[]): T[] {
 }
 
 export async function exportAllData() {
-  const [clubs, teams, players, sessions, attendance, lineups, cotisations, expenses, evaluations] =
+  const [
+    clubs,
+    teams,
+    players,
+    sessions,
+    attendance,
+    lineups,
+    cotisations,
+    expenses,
+    evaluations,
+    opponentCrests,
+  ] =
     await Promise.all([
       db.clubs.toArray(),
       db.teams.toArray(),
@@ -49,6 +61,7 @@ export async function exportAllData() {
       db.cotisations.toArray(),
       db.expenses.toArray(),
       db.evaluations.toArray(),
+      db.opponent_crests.toArray(),
     ]);
 
   return {
@@ -65,6 +78,7 @@ export async function exportAllData() {
       cotisations: stripOwner(cotisations),
       expenses: stripOwner(expenses),
       evaluations: stripOwner(evaluations),
+      opponent_crests: stripOwner(opponentCrests),
     },
   };
 }
@@ -78,7 +92,18 @@ export async function importAllData(payload: unknown) {
     throw new Error("ملف غير صالح");
   }
 
-  const tables = [db.clubs, db.teams, db.players, db.sessions, db.attendance, db.lineups, db.cotisations, db.expenses, db.evaluations];
+  const tables = [
+    db.clubs,
+    db.teams,
+    db.players,
+    db.sessions,
+    db.attendance,
+    db.lineups,
+    db.cotisations,
+    db.expenses,
+    db.evaluations,
+    db.opponent_crests,
+  ];
 
   // A restore replaces the whole database, so any row the backup does not
   // mention is a deletion and has to be tombstoned. Otherwise it would come back
@@ -104,6 +129,7 @@ export async function importAllData(payload: unknown) {
     await db.cotisations.bulkPut(rowsOf<Cotisation>(d.cotisations));
     await db.expenses.bulkPut(rowsOf<Expense>(d.expenses));
     await db.evaluations.bulkPut(rowsOf<Evaluation>(d.evaluations));
+    await db.opponent_crests.bulkPut(rowsOf<OpponentCrest>(d.opponent_crests));
   });
 
   for (const table of ALL_TABLES) {

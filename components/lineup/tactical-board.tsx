@@ -21,6 +21,8 @@ import { useOwnerId } from "@/components/auth-provider";
 import { stageDelete } from "@/lib/offline/sync-ledger";
 import { cn } from "@/lib/utils";
 import MatchResultEditor from "./match-result-editor";
+import OpponentCrestPicker from "./opponent-crest-picker";
+import { opponentKey, deleteCrest, saveCrest } from "@/lib/offline/opponents";
 
 interface SlotTemplate {
   key: string;
@@ -170,22 +172,31 @@ interface DrawPath {
 function SavedLineupRow({
   lineup: l,
   playersById,
+  crests,
   onLoad,
   onEditResult,
   onDelete,
 }: {
   lineup: Lineup;
   playersById: Map<string, Player>;
+  crests: Map<string, string>;
   onLoad: (l: Lineup) => void;
   onEditResult: (l: Lineup) => void;
   onDelete: (id: string) => void;
 }) {
   const mvp = l.mvp_id != null ? playersById.get(l.mvp_id) : undefined;
   const against = l.goals_against ?? 0;
+  const crest = lineupKind(l) === "official" ? crests.get(opponentKey(l.opponent)) : undefined;
   return (
     <li className="flex items-center justify-between gap-3 px-4 py-2">
-      <button onClick={() => onLoad(l)} className="text-right text-sm hover:underline">
-        {l.date} — ضد {l.opponent || "?"} ({l.formation}، {l.venue})
+      <button onClick={() => onLoad(l)} className="flex min-w-0 items-center gap-2 text-right text-sm hover:underline">
+        {crest && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={crest} alt="" className="h-8 w-8 shrink-0 object-contain" />
+        )}
+        <span className="truncate">
+          {l.date} — ضد {l.opponent || "?"} ({l.formation}، {l.venue})
+        </span>
       </button>
       <span className="flex items-center gap-3">
         {l.goals_for != null && (
@@ -304,6 +315,37 @@ export default function TacticalBoard() {
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState("");
   const [editingResult, setEditingResult] = useState<Lineup | null>(null);
+
+  /**
+   * The opponent's crest, looked up from the name currently in the form.
+   *
+   * `useLiveQuery` rather than an effect: it re-runs the moment the coach finishes
+   * typing or switches the fixture kind, and again on every sync, so a crest
+   * added on the other phone turns up here without a refresh.
+   *
+   * Training matches deliberately get no crest. A training game is normally
+   * against your own second team, and a rival's logo beside it is misleading.
+   */
+  const opponentCrest = useLiveQuery(
+    async () => {
+      if (kind !== "official" || !opponent.trim()) return undefined;
+      return (
+        (await db.opponent_crests.where("key").equals(opponentKey(opponent)).first()) ??
+        undefined
+      );
+    },
+    [opponent, kind],
+    undefined,
+  );
+
+  /**
+   * Every known crest, in one read rather than one query per saved lineup.
+   */
+  const knownCrests = useLiveQuery(
+    async () => new Map((await db.opponent_crests.toArray()).map((r) => [r.key, r.crest_url])),
+    [],
+    new Map<string, string>(),
+  );
 
   // New creative features
   const [mode, setMode] = useState<"players" | "draw">("players");
@@ -498,6 +540,38 @@ export default function TacticalBoard() {
     setCurrentPath(null);
   }
 
+  /**
+   * Persists a crest under the opponent's current name.
+   *
+   * The crest is saved the moment it is picked rather than on "save lineup",
+   * because it belongs to the opponent rather than to this fixture. A coach who
+   * picks a logo and then abandons the fixture has still saved useful work, and
+   * every other fixture against that club picks it up.
+   */
+  async function onCrestChange(dataUrl: string) {
+    if (!opponent.trim()) {
+      setSaveMsg("اكتب اسم الخصم أولاً");
+      setTimeout(() => setSaveMsg(""), 2500);
+      return;
+    }
+    if (!dataUrl) {
+      // Clearing goes through the registry so the server copy goes too, which a
+      // local-only delete would leave to come back on the next pull.
+      const current = opponentCrest;
+      if (current?.id != null) await deleteCrest(current.id);
+      return;
+    }
+    try {
+      await saveCrest(opponent, dataUrl);
+      setSaveMsg("تم حفظ الشعار ✓");
+      setTimeout(() => setSaveMsg(""), 2500);
+    } catch (e) {
+      console.error("Crest save failed:", e);
+      setSaveMsg("تعذّر حفظ الشعار");
+      setTimeout(() => setSaveMsg(""), 2500);
+    }
+  }
+
   async function saveLineup() {
     if (!selectedTeamId) return;
     await db.lineups.add({
@@ -539,6 +613,7 @@ export default function TacticalBoard() {
 
   const rowActions = {
     playersById,
+    crests: knownCrests,
     onLoad: loadLineup,
     onEditResult: setEditingResult,
     onDelete: deleteLineup,
@@ -654,6 +729,18 @@ export default function TacticalBoard() {
             <option>خارج</option>
           </select>
         </label>
+        {/* Official fixtures only. Spans two columns so the crest picker is not
+            squeezed into the same narrow track as a text input. */}
+        {kind === "official" && (
+          <div className="md:col-span-2">
+            <p className="mb-1 text-sm font-medium">شعار الخصم</p>
+            <OpponentCrestPicker
+              crest={opponentCrest?.crest_url ?? ""}
+              onChange={(d) => void onCrestChange(d)}
+              opponent={opponent}
+            />
+          </div>
+        )}
         <label className="text-sm font-medium">
           الخطة
           <select value={formation} onChange={(e) => changeFormation(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2">
@@ -884,6 +971,25 @@ export default function TacticalBoard() {
 
       {/* Printable match sheet */}
       <div className="hidden print:block text-black">
+        {/*
+          The crest sits in the header on its own row rather than inline with the
+          title. Inlined it would push the heading off-centre and vary in height
+          depending on whether a crest exists, which makes successive sheets
+          inconsistent. On its own row with a fixed height the page prints the
+          same way whether or not the coach has added a logo yet.
+        */}
+        {opponentCrest && (
+          <div className="mb-2 flex justify-center">
+            {/* object-contain and a fixed box: artwork is never cropped, and the
+                transparent background survives so there is no white box. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={opponentCrest.crest_url}
+              alt={`شعار ${opponent}`}
+              className="h-24 w-24 object-contain"
+            />
+          </div>
+        )}
         <h1 className="text-2xl font-bold text-center">ورقة المباراة — {team?.name}</h1>
         <p className="text-center text-sm">
           {opponent || "خصم غير محدد"} · {matchDate} · {venue} · خطة {formation}

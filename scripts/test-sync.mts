@@ -24,6 +24,7 @@ import {
 } from "../lib/supabase/sync.ts";
 import { buildArchive, type ArchiveLineupRow } from "../lib/offline/archive.ts";
 import { lineupKind } from "../lib/offline/db.ts";
+import { deleteCrest, findCrest, saveCrest } from "../lib/offline/opponents.ts";
 import { addClub, deleteClub } from "../lib/offline/hierarchy.ts";
 import { resetAllData, deletePlayerCascade } from "../lib/offline/data.ts";
 import {
@@ -116,6 +117,80 @@ function useCloud(next: ReturnType<typeof fakeCloud>) {
 }
 
 console.log("\nsync reconciliation\n");
+
+await test("a crest is stored once and found by a normalised name", async () => {
+  const c = fakeCloud();
+  useCloud(c);
+  const url = "data:image/png;base64,iVBORw0KGgo=";
+
+  // The coach types "  Raja  Casablanca " with stray whitespace.
+  await saveCrest("  Raja  Casablanca ", url);
+
+  // Every fixture against that club finds it, whatever the spelling.
+  assert.ok(await findCrest("Raja Casablanca"), "exact name matches");
+  assert.ok(await findCrest("  Raja   Casablanca "), "whitespace is collapsed");
+  assert.ok(await findCrest("raja casablanca"), "case is ignored");
+
+  // A different club does not borrow it.
+  assert.equal(await findCrest("Wydad"), undefined);
+
+  // Re-picking a logo replaces the row instead of adding a second one: a club
+  // plays the same rival repeatedly and one crest per rival is the point.
+  await saveCrest("Raja Casablanca", "data:image/png;base5,CHANGED");
+  assert.equal((await db.opponent_crests.toArray()).length, 1, "still one row");
+  assert.equal((await findCrest("Raja Casablanca"))!.crest_url, "data:image/png;base5,CHANGED");
+
+  // Deleting removes it locally and leaves a tombstone, or the next pull would
+  // bring the logo back.
+  const row = (await db.opponent_crests.toArray())[0];
+  await deleteCrest(row.id!);
+  assert.equal((await db.opponent_crests.toArray()).length, 0);
+  const staged = await stagedDeletes();
+  assert.ok(
+    staged.some((s) => s.table_name === "opponent_crests" && s.row_id === row.id),
+    "the delete must be staged for the server",
+  );
+
+  await pushToCloud(c.client as never, UID);
+  assert.deepEqual(
+    (await pushToCloud(c.client as never, UID)).errors,
+    [],
+    "pushing a crest must be accepted",
+  );
+});
+
+await test("a crest row pushes and pulls like any other row", async () => {
+  const c = fakeCloud();
+  useCloud(c);
+  await saveCrest("Raja", "data:image/png;base64,AAAA");
+  await pushToCloud(c.client as never, UID);
+  assert.equal(c.rows("opponent_crests").length, 1, "the crest reached the server");
+  assert.ok(
+    (await syncedIdsFor("opponent_crests", UID)).size === 1,
+    "and is recorded as confirmed",
+  );
+
+  // A crest added on another device arrives on the next pull.
+  await db.opponent_crests.add({
+    id: "crest-from-phone",
+    name: "Wydad",
+    key: "wydad",
+    crest_url: "data:image/png;base64,BBBB",
+    created_at: new Date().toISOString(),
+    owner_id: UID,
+  });
+  c.rows("opponent_crests").push({
+    id: "crest-from-phone",
+    name: "Wydad",
+    key: "wydad",
+    crest_url: "data:image/png;base64,BBBB",
+    owner_id: UID,
+  });
+
+  const pull = await pullFromCloud(c.client as never, UID);
+  assert.equal(pull.errors.length, 0);
+  assert.ok(await findCrest("Wydad"), "the other device's crest arrived");
+});
 
 await test("a training match never touches the season record", async () => {
   const teamId = "t-team-1";

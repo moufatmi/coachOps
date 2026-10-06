@@ -221,6 +221,27 @@ export interface TrainingSession extends Owned {
   time?: string;
 }
 
+/**
+ * An opponent's crest, stored once per club rather than once per fixture.
+ *
+ * The opponent is free text typed into the lineup form, so the crest is keyed by
+ * that text instead of by lineup id. A club plays the same opponent eight times a
+ * season; storing the image on each of those rows would ship eight copies of the
+ * same 15KB through sync, and a fixture saved before the coach got round to
+ * adding the crest would never gain one. Keying by name fixes both: the crest is
+ * uploaded once and every fixture against that club gets it, past and future.
+ *
+ * `key` is the lookup form (trimmed, lowercased, internal whitespace collapsed)
+ * and `name` is kept as typed, because that is what gets printed.
+ */
+export interface OpponentCrest extends Owned {
+  name: string;
+  key: string;
+  /** Base64 data URL. Kept small by lib/offline/photo.ts fileToCrest. */
+  crest_url: string;
+  created_at: string;
+}
+
 export interface Attendance extends Owned {
   session_id: string;
   player_id: string;
@@ -272,6 +293,7 @@ const db = new Dexie(DB_NAME) as Dexie & {
   evaluations: EntityTable<Evaluation, "id">;
   pending_deletes: EntityTable<PendingDelete, "id">;
   synced_rows: EntityTable<SyncedRow, "id">;
+  opponent_crests: EntityTable<OpponentCrest, "id">;
 };
 
 db.version(1).stores({
@@ -365,6 +387,12 @@ db.version(9).stores({
   lineups: "id, team_id, date, opponent, venue, formation, kind, owner_id",
 });
 
+// v10 adds the opponent crest registry. A new table, so nothing existing is
+// rewritten and no upgrade step is needed.
+db.version(10).stores({
+  opponent_crests: "id, key, name, owner_id",
+});
+
 /** Every table, for use by backup, export and ownership sweeps. */
 export const ALL_TABLES = [
   "clubs",
@@ -377,6 +405,9 @@ export const ALL_TABLES = [
   "cotisations",
   "expenses",
   "evaluations",
+  // Not attached to a team, so it comes last. It is a per-coach lookup table and
+  // deleting an age group must never touch it.
+  "opponent_crests",
 ] as const;
 
 export type TableName = (typeof ALL_TABLES)[number];
